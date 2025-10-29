@@ -18,7 +18,7 @@ module.exports.loop = function () {
             tower.attack(closestHostile);
         }
     }
-    console.log(Game.creeps)
+    console.log(JSON.stringify(Game.creeps))
     for(var name in Game.creeps) {
         var creep = Game.creeps[name];
         if(creep.memory.role == 'harvester') {
