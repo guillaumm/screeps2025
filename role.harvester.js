@@ -43,7 +43,7 @@ module.exports = {
                     creep.moveTo(structure);
                 }
             }
-            if (structure = undefined) { roleUpgrader.run(creep) }
+            if (structure == undefined) { roleUpgrader.run(creep) }
                 
         }
         // if creep is supposed to harvest energy from source

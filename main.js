@@ -136,8 +136,8 @@ module.exports.loop = function() {
 	//let longdistanceharvesters = _.filter(Game.creeps, (creep) => creep.memory.role == 'longDistanceHarvester');
 	let numberOfLongDistanceHarvesters = _.sum(Game.creeps, (c) => c.memory.role == 'longDistanceHarvester' && c.memory.target == 'E12S12')
 	let builders = _.filter(Game.creeps, (creep) => creep.memory.role == 'builder');
-	let repairers = _.filter(Game.creeps, (creep) => creep.memory.role == 'repairer');
-	let roadRepairers = _.filter(Game.creeps, (creep) => creep.memory.role == 'roadRepairer');
+	//let repairers = _.filter(Game.creeps, (creep) => creep.memory.role == 'repairer');
+	//let roadRepairers = _.filter(Game.creeps, (creep) => creep.memory.role == 'roadRepairer');
 	let miners = _.filter(Game.creeps, (creep) => creep.memory.role == 'miner');
     let lorries = _.filter(Game.creeps, (creep) => creep.memory.role == 'lorry');
 	
