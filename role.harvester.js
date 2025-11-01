@@ -3,6 +3,10 @@
 
 // role.harvester
 
+
+var roleUpgrader = require('role.upgrader');
+
+
 module.exports = {
     // a function to run the logic for this role
     /** @param {Creep} creep */
