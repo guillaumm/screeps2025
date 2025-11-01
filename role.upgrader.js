@@ -1,6 +1,4 @@
-
 // role.upgrader
-
 
 module.exports = {
     // a function to run the logic for this role
@@ -17,15 +15,8 @@ module.exports = {
             creep.memory.working = true;
         }
 
-        let miners = _.filter(Game.creeps, (creep) => creep.memory.role == 'miner');
-        let nbSources = Game.spawns['Spawn1'].room.find(FIND_SOURCES).length;
-        //console.log('nbSources in upgrader  ' + nbSources);
-        
         // if creep is supposed to transfer energy to the controller
         if (creep.memory.working == true) {
-            // instead of upgraderController we could also use:
-            // if (creep.transfer(creep.room.controller, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
-
             // try to upgrade the controller
             if (creep.upgradeController(creep.room.controller) == ERR_NOT_IN_RANGE) {
                 // if not in range, move towards the controller
@@ -33,10 +24,19 @@ module.exports = {
             }
         }
         // if creep is supposed to get energy
-        //else if (miners.length >= nbSources) {
         else if (creep.memory.working == false) {
-            //console.log('upgrader get nrj')
-            creep.getEnergy(true, false);
+            // Vérifier combien de miners existent
+            let miners = _.filter(Game.creeps, (c) => c.memory.role == 'miner');
+            let nbSources = creep.room.find(FIND_SOURCES).length;
+            
+            // Si on a assez de miners, utiliser containers/storage uniquement
+            if (miners.length >= nbSources) {
+                creep.getEnergy(true, false);
+            }
+            // Sinon (phase bootstrap/construction), aussi récolter aux sources
+            else {
+                creep.getEnergy(true, true);
+            }
         }
     }
 };

@@ -1,11 +1,6 @@
-
-
-
 // role.harvester
 
-
 var roleUpgrader = require('role.upgrader');
-
 
 module.exports = {
     // a function to run the logic for this role
@@ -47,14 +42,17 @@ module.exports = {
                     creep.moveTo(structure);
                 }
             }
-            if (structure == undefined) { roleUpgrader.run(creep) }
+            // Bug corrigé : == au lieu de =
+            else if (structure == undefined) { 
+                roleUpgrader.run(creep);
+            }
                 
         }
         // if creep is supposed to harvest energy from source
         else {
+            // Les harvesters récoltent toujours directement aux sources
+            // (c'est leur rôle de backup)
             creep.getEnergy(true, true);
         }
     }
 };
-
-
