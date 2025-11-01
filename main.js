@@ -10,7 +10,7 @@ Version refactorisée avec système de phases de démarrage
 require('prototype.creep');
 require('prototype.tower');
 require('prototype.spawn');
-//require('prototype.link');
+require('prototype.link');
 
 // ========== CONFIGURATION GLOBALE ==========
 const HOME_ROOM = 'E13S12';
@@ -153,10 +153,50 @@ function getPhase(minerCount, nbSources, containerCount, constructionSiteCount) 
     return 'PRODUCTION';
 }
 
+// ========== FONCTION DE CRÉATION DE CORPS ADAPTATIF ==========
+
+function getAdaptiveBody(energy, type) {
+    // Retourne un corps adapté à l'énergie disponible
+    
+    if (type == 'worker') {
+        // Pour builder, upgrader : pattern [WORK, CARRY, MOVE]
+        // Coût : 200 par unité
+        if (energy < 200) return [WORK, CARRY, MOVE]; // Minimum
+        
+        let units = Math.floor(energy / 200);
+        units = Math.min(units, 16); // Max 16 unités = 48 parts
+        
+        let body = [];
+        for (let i = 0; i < units; i++) {
+            body.push(WORK, CARRY, MOVE);
+        }
+        return body;
+    }
+    
+    if (type == 'lorry') {
+        // Pour lorry : pattern [CARRY, CARRY, MOVE]
+        // Coût : 150 par unité
+        if (energy < 150) return [CARRY, MOVE]; // Minimum
+        
+        let units = Math.floor(energy / 150);
+        units = Math.min(units, 16); // Max 16 unités = 48 parts
+        
+        let body = [];
+        for (let i = 0; i < units; i++) {
+            body.push(CARRY, CARRY, MOVE);
+        }
+        return body;
+    }
+    
+    // Par défaut
+    return [WORK, CARRY, MOVE];
+}
+
 // ========== FONCTIONS DE SPAWN PAR PHASE ==========
 
 function spawnBootstrapCreeps(spawn, counts) {
     // En phase bootstrap, on veut 2 harvesters minimum pour démarrer
+    // Body basique : [WORK,CARRY,MOVE] = 200 énergie
     if (counts.harvesters < 2) {
         let newName = 'Harvester_' + Game.time;
         console.log('[BOOTSTRAP] Spawning harvester: ' + newName);
@@ -167,20 +207,22 @@ function spawnBootstrapCreeps(spawn, counts) {
     }
     
     // Ensuite 1 builder pour construire les containers
+    // Body basique : [WORK,CARRY,MOVE] = 200 énergie
     if (counts.builders < 1) {
         let newName = 'Builder_' + Game.time;
         console.log('[BOOTSTRAP] Spawning builder: ' + newName);
-        spawn.spawnCreep([MOVE,WORK,CARRY,MOVE,WORK,CARRY], newName, {
+        spawn.spawnCreep([WORK,CARRY,MOVE], newName, {
             memory: {role: 'builder', working: false}
         });
         return;
     }
     
     // Puis 1 upgrader pour progresser
+    // Body basique : [WORK,CARRY,MOVE] = 200 énergie
     if (counts.upgraders < 1) {
         let newName = 'Upgrader_' + Game.time;
         console.log('[BOOTSTRAP] Spawning upgrader: ' + newName);
-        spawn.spawnCreep([MOVE,WORK,CARRY,MOVE,WORK,CARRY], newName, {
+        spawn.spawnCreep([WORK,CARRY,MOVE], newName, {
             memory: {role: 'upgrader', working: false}
         });
         return;
@@ -189,6 +231,7 @@ function spawnBootstrapCreeps(spawn, counts) {
 
 function spawnConstructionCreeps(spawn, counts, nbSources) {
     // En phase construction, on maintient 1 harvester de backup
+    // Body basique pour économiser l'énergie
     if (counts.harvesters < 1) {
         let newName = 'Harvester_' + Game.time;
         console.log('[CONSTRUCTION] Spawning backup harvester: ' + newName);
@@ -204,7 +247,9 @@ function spawnConstructionCreeps(spawn, counts, nbSources) {
     if (counts.builders < 1) {
         let newName = 'Builder_' + Game.time;
         console.log('[CONSTRUCTION] Spawning builder: ' + newName);
-        spawn.spawnCreep([MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY], newName, {
+        // Body adaptatif selon l'énergie disponible
+        let body = getAdaptiveBody(spawn.room.energyAvailable, 'worker');
+        spawn.spawnCreep(body, newName, {
             memory: {role: 'builder', working: false}
         });
         return;
@@ -213,7 +258,9 @@ function spawnConstructionCreeps(spawn, counts, nbSources) {
     if (counts.upgraders < 2) {
         let newName = 'Upgrader_' + Game.time;
         console.log('[CONSTRUCTION] Spawning upgrader: ' + newName);
-        spawn.spawnCreep([MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY], newName, {
+        // Body adaptatif selon l'énergie disponible
+        let body = getAdaptiveBody(spawn.room.energyAvailable, 'worker');
+        spawn.spawnCreep(body, newName, {
             memory: {role: 'upgrader', working: false}
         });
         return;
@@ -224,7 +271,8 @@ function spawnConstructionCreeps(spawn, counts, nbSources) {
     if (counts.lorries < nbLorries) {
         let newName = 'Lorry_' + Game.time;
         console.log('[CONSTRUCTION] Spawning lorry: ' + newName);
-        spawn.spawnCreep([CARRY,MOVE,CARRY,MOVE], newName, {
+        let body = getAdaptiveBody(spawn.room.energyAvailable, 'lorry');
+        spawn.spawnCreep(body, newName, {
             memory: {role: 'lorry', working: false}
         });
         return;
@@ -232,14 +280,15 @@ function spawnConstructionCreeps(spawn, counts, nbSources) {
 }
 
 function spawnProductionCreeps(spawn, counts, nbSources) {
-    // En phase production, système complet
+    // En phase production, système complet avec corps optimisés
     
     // Maintenir les lorries (1 par miner)
     let nbLorries = counts.miners * CONFIG.lorryFactor;
     if (counts.lorries < nbLorries) {
         let newName = 'Lorry_' + Game.time;
         console.log('[PRODUCTION] Spawning lorry: ' + newName);
-        spawn.spawnCreep([CARRY,MOVE,CARRY,MOVE], newName, {
+        let body = getAdaptiveBody(spawn.room.energyCapacityAvailable, 'lorry');
+        spawn.spawnCreep(body, newName, {
             memory: {role: 'lorry', working: false}
         });
         return;
@@ -249,8 +298,8 @@ function spawnProductionCreeps(spawn, counts, nbSources) {
     if (counts.upgraders < CONFIG.upgraders) {
         let newName = 'Upgrader_' + Game.time;
         console.log('[PRODUCTION] Spawning upgrader: ' + newName);
-        let upgradeBody = [MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY];
-        spawn.spawnCreep(upgradeBody, newName, {
+        let body = getAdaptiveBody(spawn.room.energyCapacityAvailable, 'worker');
+        spawn.spawnCreep(body, newName, {
             memory: {role: 'upgrader', working: false}
         });
         return;
@@ -260,7 +309,8 @@ function spawnProductionCreeps(spawn, counts, nbSources) {
     if (counts.builders < CONFIG.builders) {
         let newName = 'Builder_' + Game.time;
         console.log('[PRODUCTION] Spawning builder: ' + newName);
-        spawn.spawnCreep([MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY], newName, {
+        let body = getAdaptiveBody(spawn.room.energyCapacityAvailable, 'worker');
+        spawn.spawnCreep(body, newName, {
             memory: {role: 'builder', working: false}
         });
         return;
@@ -270,11 +320,16 @@ function spawnProductionCreeps(spawn, counts, nbSources) {
     if (counts.longDistanceHarvesters < CONFIG.longDistanceHarvesters) {
         let newName = 'LDH_' + Game.time;
         console.log('[PRODUCTION] Spawning LDH: ' + newName);
-        spawn.spawnCreep(
-            [MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,ATTACK],
-            newName,
-            {memory: {role: 'longDistanceHarvester', home: 'E13S12', target: 'E12S12', sourceIndex: 0, working: false}}
-        );
+        // LDH avec body fixe pour l'instant (peut être optimisé plus tard)
+        let body = [MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,ATTACK];
+        // Vérifier si assez d'énergie, sinon body simple
+        if (spawn.room.energyCapacityAvailable < 1250) {
+            body = getAdaptiveBody(spawn.room.energyCapacityAvailable, 'worker');
+            body.push(ATTACK); // Ajouter une part d'attaque
+        }
+        spawn.spawnCreep(body, newName, {
+            memory: {role: 'longDistanceHarvester', home: HOME_ROOM, target: TARGET_ROOM, sourceIndex: 0, working: false}
+        });
         return;
     }
 }
