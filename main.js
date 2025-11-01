@@ -14,7 +14,7 @@ centraliser dans la mémoire les états globaux (mode de fonctionnement)
 require('prototype.creep');
 require('prototype.tower');
 require('prototype.spawn');
-require('prototype.link');
+//require('prototype.link');
 
 module.exports.loop = function() {
     
@@ -94,14 +94,19 @@ module.exports.loop = function() {
     // find all links
     //const sourceList = Game.spawns['Spawn1'].room.find(FIND_SOURCES);
     //console.log('sourceList   '+ sourceList)
-    let linkList = _.filter(Game.structures, s => s.structureType == STRUCTURE_LINK);
-    //console.log('linkList   '+ linkList)
+    // find all links
+let linkList = _.filter(Game.structures, s => s.structureType == STRUCTURE_LINK);
+
+// Vérifier qu'il y a assez de links avant de les utiliser
+if (linkList.length >= 3) {
     let linkTo = linkList[0];
-    if (linkList[1].store.getFreeCapacity(RESOURCE_ENERGY)>linkList[0].store.getFreeCapacity(RESOURCE_ENERGY)) {
+    if (linkList[1].store.getFreeCapacity(RESOURCE_ENERGY) > linkList[0].store.getFreeCapacity(RESOURCE_ENERGY)) {
         linkTo = linkList[1];
     }
     
-    linkList[2].transferEnergy(linkTo); //control
+    linkList[2].transferEnergy(linkTo);
+}
+
 
     // for each link
     /*for (let link of linksFrom) {
