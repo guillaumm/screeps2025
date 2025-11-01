@@ -6,10 +6,10 @@ var roles = {
     harvester: require('role.harvester'),
     upgrader: require('role.upgrader'),
     builder: require('role.builder'),
-    repairer: require('role.repairer'),
+    //repairer: require('role.repairer'),
     //wallRepairer: require('role.wallRepairer'),
     longDistanceHarvester: require('role.longDistanceHarvester'),
-    roadRepairer: require('role.roadRepairer'),
+    //roadRepairer: require('role.roadRepairer'),
     miner: require('role.miner'),
     lorry: require('role.lorry')
 };
