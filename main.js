@@ -8,7 +8,6 @@ Version refactorisée avec système de phases de démarrage
 require('prototype.creep');
 require('prototype.tower');
 require('prototype.spawn');
-require('prototype.link');
 
 // Import nouveaux modules
 const CONFIG = require('config.orchestrator');
