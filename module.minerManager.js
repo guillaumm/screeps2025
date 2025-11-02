@@ -12,15 +12,28 @@ module.exports = {
      */
     analyzeMinerNeeds: function(room) {
         let sources = room.find(FIND_SOURCES);
-        let existingMiners = _.filter(Game.creeps, c => c.memory.role == 'miner' && c.room.name == room.name);
+        let existingMiners = _.filter(Game.creeps, c => c.memory.role == 'miner');
         
         let needs = [];
         
         for (let source of sources) {
-            // Vérifier si cette source a déjà un miner
+            // Vérifier si cette source a déjà un miner (vivant ou spawning)
             let assignedMiner = _.find(existingMiners, m => m.memory.sourceId == source.id);
             
-            if (!assignedMiner) {
+            // Vérifier aussi si un miner est en cours de spawn pour cette source
+            let spawningMiner = false;
+            for (let spawnName in Game.spawns) {
+                let spawn = Game.spawns[spawnName];
+                if (spawn.spawning) {
+                    let spawningCreep = Game.creeps[spawn.spawning.name];
+                    if (spawningCreep && spawningCreep.memory.role == 'miner' && spawningCreep.memory.sourceId == source.id) {
+                        spawningMiner = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (!assignedMiner && !spawningMiner) {
                 // Chercher un container près de la source
                 let containers = source.pos.findInRange(FIND_STRUCTURES, 2, {
                     filter: s => s.structureType == STRUCTURE_CONTAINER
@@ -62,7 +75,9 @@ module.exports = {
      * @returns {number}
      */
     getMinerCount: function(room) {
-        return _.filter(Game.creeps, c => c.memory.role == 'miner' && c.room.name == room.name).length;
+        return _.filter(Game.creeps, c => c.memory.role == 'miner' && c.memory.sourceId && 
+            Game.getObjectById(c.memory.sourceId) && Game.getObjectById(c.memory.sourceId).room.name == room.name
+        ).length;
     },
     
     /**

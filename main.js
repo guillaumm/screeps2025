@@ -20,6 +20,11 @@ module.exports.loop = function() {
     // Récupérer le spawn principal
     let mainSpawn = Game.spawns[Object.keys(Game.spawns)[0]];
     
+    // ========== DIAGNOSTIC TEMPORAIRE ==========
+    if (Game.time % 50 == 0) {
+        require('debug.minerDiagnostic').run();
+    }
+    
     // ========== RAPPORT PÉRIODIQUE ==========
     if (Game.time % CONFIG.REPORT_INTERVAL == 0) {
         Reporter.generateReport(mainSpawn);
@@ -147,6 +152,12 @@ function spawnWithOrchestrator(spawn) {
         ? MinerManager.getRequiredMinerCount(spawn.room)
         : quotas.miners;
     
+    // Debug: log des quotas
+    if (Game.time % 10 == 0) {
+        console.log('[ORCHESTRATOR] Quotas - H:' + quotas.harvesters + ' M:' + minerQuota + ' L:' + lorryQuota + ' U:' + quotas.upgraders + ' B:' + quotas.builders);
+        console.log('[ORCHESTRATOR] Counts - H:' + creepCounts.harvesters + ' M:' + creepCounts.miners + ' L:' + creepCounts.lorries + ' U:' + creepCounts.upgraders + ' B:' + creepCounts.builders);
+    }
+    
     // Ajouter les besoins à la liste
     if (creepCounts.harvesters < quotas.harvesters) {
         spawnNeeds.push({ role: 'harvester', priority: CONFIG.SPAWN_PRIORITY.harvesters });
@@ -155,6 +166,9 @@ function spawnWithOrchestrator(spawn) {
     // Miners : vérifier qu'on peut les créer (containers présents)
     if (creepCounts.miners < minerQuota && MinerManager.canSpawnMiners(spawn.room)) {
         spawnNeeds.push({ role: 'miner', priority: CONFIG.SPAWN_PRIORITY.miners });
+        if (Game.time % 10 == 0) {
+            console.log('[ORCHESTRATOR] Besoin de miner détecté : ' + creepCounts.miners + '/' + minerQuota);
+        }
     }
     
     if (creepCounts.lorries < lorryQuota) {
@@ -172,6 +186,11 @@ function spawnWithOrchestrator(spawn) {
     
     // Trier par priorité (plus petit = plus prioritaire)
     spawnNeeds.sort((a, b) => a.priority - b.priority);
+    
+    // Debug : afficher les besoins
+    if (spawnNeeds.length > 0 && Game.time % 10 == 0) {
+        console.log('[ORCHESTRATOR] Besoins détectés : ' + spawnNeeds.map(n => n.role).join(', '));
+    }
     
     // Spawn le creep le plus prioritaire
     if (spawnNeeds.length > 0) {
