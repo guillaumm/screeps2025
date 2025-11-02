@@ -13,8 +13,8 @@ require('prototype.spawn');
 require('prototype.link');
 
 // ========== CONFIGURATION GLOBALE ==========
-const HOME_ROOM = 'E13S12';
-const TARGET_ROOM = 'E12S12';
+const HOME_ROOM = 'W13N57';
+const TARGET_ROOM = 'W12N57';
 
 // Nombres de creeps souhaités (Phase 3 - Production)
 const CONFIG = {
