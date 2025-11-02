@@ -2,6 +2,7 @@
 Version refactorisée avec système de phases de démarrage
 + Orchestrateur configurable
 + Système de rapport automatique
++ Gestion centralisée des miners
 */
 
 // Import modules
@@ -12,6 +13,7 @@ require('prototype.spawn');
 // Import nouveaux modules
 const CONFIG = require('config.orchestrator');
 const Reporter = require('module.reporter');
+const MinerManager = require('module.minerManager');
 
 module.exports.loop = function() {
     
@@ -100,7 +102,7 @@ function spawnWithOrchestrator(spawn) {
         harvesters: _.filter(Game.creeps, c => c.memory.role == 'harvester').length,
         upgraders: _.filter(Game.creeps, c => c.memory.role == 'upgrader').length,
         builders: _.filter(Game.creeps, c => c.memory.role == 'builder').length,
-        miners: _.filter(Game.creeps, c => c.memory.role == 'miner').length,
+        miners: MinerManager.getMinerCount(spawn.room),
         lorries: _.filter(Game.creeps, c => c.memory.role == 'lorry').length,
         longDistanceHarvesters: _.sum(Game.creeps, c => 
             c.memory.role == 'longDistanceHarvester' && c.memory.target == CONFIG.TARGET_ROOM
@@ -123,14 +125,14 @@ function spawnWithOrchestrator(spawn) {
     // Log de la phase (debug)
     if (Game.time % 100 == 0) {
         console.log("=== Phase actuelle: " + phase + " ===");
-        console.log("Miners: " + creepCounts.miners + "/" + nbSources);
+        console.log("Miners: " + creepCounts.miners + "/" + MinerManager.getRequiredMinerCount(spawn.room));
         console.log("Containers: " + containers.length);
         console.log("Sites de construction: " + constructionSites.length);
     }
     
-    // Vérifier si on a assez d'énergie pour spawn
+    // Vérifier si on a assez d'énergie pour spawn (sauf en bootstrap)
     if (!CONFIG.hasEnoughEnergyToSpawn(spawn.room) && phase !== 'BOOTSTRAP') {
-        return; // Attendre d'avoir plus d'énergie (sauf en bootstrap où on est pauvre)
+        return;
     }
     
     // Créer une liste de besoins avec priorités
@@ -142,16 +144,19 @@ function spawnWithOrchestrator(spawn) {
         : quotas.lorries;
     
     let minerQuota = quotas.miners === 'auto'
-        ? nbSources
+        ? MinerManager.getRequiredMinerCount(spawn.room)
         : quotas.miners;
     
     // Ajouter les besoins à la liste
     if (creepCounts.harvesters < quotas.harvesters) {
         spawnNeeds.push({ role: 'harvester', priority: CONFIG.SPAWN_PRIORITY.harvesters });
     }
-    if (creepCounts.miners < minerQuota) {
+    
+    // Miners : vérifier qu'on peut les créer (containers présents)
+    if (creepCounts.miners < minerQuota && MinerManager.canSpawnMiners(spawn.room)) {
         spawnNeeds.push({ role: 'miner', priority: CONFIG.SPAWN_PRIORITY.miners });
     }
+    
     if (creepCounts.lorries < lorryQuota) {
         spawnNeeds.push({ role: 'lorry', priority: CONFIG.SPAWN_PRIORITY.lorries });
     }
@@ -197,11 +202,6 @@ function getPhase(minerCount, nbSources, containerCount, constructionSiteCount) 
 function getAdaptiveBody(energy, type, phase) {
     // Appliquer le multiplicateur de taille depuis la config
     let multiplier = CONFIG.BODY_SIZE_MULTIPLIER[type] || 1.0;
-    
-    // Utiliser energyCapacity en production si configuré
-    if (phase === 'PRODUCTION' && CONFIG.USE_MAX_ENERGY_IN_PRODUCTION) {
-        // On utilisera energyCapacityAvailable dans spawnCreepByRole
-    }
     
     if (type == 'worker') {
         // Pour builder, upgrader, harvester : pattern [WORK, CARRY, MOVE]
@@ -274,10 +274,25 @@ function spawnCreepByRole(spawn, role, phase) {
             break;
             
         case 'miner':
-            // Les miners sont gérés par prototype.spawn pour l'assignation aux sources
-            // On ne les spawn pas ici pour éviter les conflits
-            console.log('[ORCHESTRATOR] Miner spawn délégué à prototype.spawn');
-            return;
+            // Utiliser le MinerManager pour créer le corps et l'assignation
+            let assignment = MinerManager.getNextMinerAssignment(spawn.room);
+            
+            if (!assignment) {
+                console.log('[ORCHESTRATOR] Aucune source disponible pour miner');
+                return;
+            }
+            
+            body = MinerManager.createMinerBody(
+                availableEnergy, 
+                CONFIG.BODY_SIZE_MULTIPLIER.miner || 1.0
+            );
+            
+            memory = {
+                role: 'miner',
+                sourceId: assignment.sourceId,
+                linkId: assignment.linkId
+            };
+            break;
             
         case 'longDistanceHarvester':
             // Body spécial avec ATTACK
@@ -305,5 +320,12 @@ function spawnCreepByRole(spawn, role, phase) {
     
     if (result == OK) {
         console.log(`[${phase}] Spawning ${role}: ${newName}`);
+        if (role === 'miner' && memory.sourceId) {
+            console.log(`  └─ Assigné à source ${memory.sourceId}`);
+        }
+    } else if (result == ERR_NOT_ENOUGH_ENERGY) {
+        // Normal, on attendra le prochain tick
+    } else {
+        console.log(`[ERROR] Spawn failed for ${role}: ${result}`);
     }
 }

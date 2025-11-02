@@ -150,11 +150,17 @@ module.exports = {
         let phase = this.getCurrentPhase();
         console.log(`  Phase actuelle:          ${phase}`);
         
-        // Sources et miners
+        // Sources et miners (utilisation du MinerManager)
+        const MinerManager = require('module.minerManager');
         let sources = room.find(FIND_SOURCES);
-        let miners = _.filter(Game.creeps, c => c.memory.role == 'miner');
+        let minerCount = MinerManager.getMinerCount(room);
+        let requiredMiners = MinerManager.getRequiredMinerCount(room);
+        
         console.log(`  Sources:                 ${sources.length}`);
-        console.log(`  Miners assignés:         ${miners.length} / ${sources.length}`);
+        console.log(`  Miners assignés:         ${minerCount} / ${requiredMiners}`);
+        
+        // Rapport détaillé des miners
+        console.log(MinerManager.generateMinerReport(room));
         
         // Containers
         let containers = room.find(FIND_STRUCTURES, {

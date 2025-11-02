@@ -1,9 +1,9 @@
-
 // prototype.spawn
-	
-	
-	//var listOfRoles = ['harvester', 'lorry', 'upgrader', 'repairer', 'builder', 'wallRepairer'];
-	var listOfRoles = ['harvester','longDistanceHarvester', 'upgrader', 'lorry', 'builder', 'miner'];
+// Version refactorisée pour s'intégrer avec l'orchestrateur
+
+const MinerManager = require('module.minerManager');
+
+var listOfRoles = ['harvester','longDistanceHarvester', 'upgrader', 'lorry', 'builder', 'miner'];
 
 // create a new function for StructureSpawn
 StructureSpawn.prototype.spawnCreepsIfNecessary =
@@ -21,11 +21,8 @@ StructureSpawn.prototype.spawnCreepsIfNecessary =
         let numberOfCreeps = {};
         for (let role of listOfRoles) {
             numberOfCreeps[role] = _.sum(creepsInRoom, (c) => c.memory.role == role);
-			//console.log(role + numberOfCreeps[role]);
-	
         }
         let maxEnergy = room.energyCapacityAvailable;
-        //console.log(maxEnergy)
         let name = undefined;
         
         // if no harvesters are left AND either no miners or no lorries are left
@@ -45,39 +42,16 @@ StructureSpawn.prototype.spawnCreepsIfNecessary =
         }
         // if no backup creep is required
         else {
-            // check if all sources have miners
+            // Utiliser le MinerManager pour vérifier les besoins en miners
+            let minerCount = MinerManager.getMinerCount(room);
+            let requiredMiners = MinerManager.getRequiredMinerCount(room);
             
-            let sources = room.find(FIND_SOURCES);
-            // iterate over all sources
-            for (let source of sources) {
-                // if the source has no miner
-                //console.log(source.id)
-                if (!_.some(creepsInRoom, c => c.memory.role == 'miner' && c.memory.sourceId == source.id)) {
-                    // check whether or not the source has a container
-                    /** @type {Array.StructureContainer} */
-                    let containers = source.pos.findInRange(FIND_STRUCTURES, 2, {
-                        filter: s => s.structureType == STRUCTURE_CONTAINER
-                    });
-                    // if there is a container next to the source
-                    if (containers.length > 0) {
-                        // spawn a miner
-                        //console.log('miner spawning - source with container' + source);
-                        let linkList = _.filter(Game.structures, s => s.structureType == STRUCTURE_LINK);
-                        //console.log('miner spawning - linkList' + linkList);
-                        let linkId
-                        for (let link of linkList) {
-                            //console.log('miner spawning - link' + link);
-                            //console.log('miner spawning - link.pos.inRangeTo(source, 2)' + link.pos.inRangeTo(source, 2));
-                            if(link.pos.inRangeTo(source, 2)) {
-                                linkId=link.id;
-                                //console.log('miner spawning - linkId' + linkId);
-                            }
-                        
-                        
-                        }
-                        name = this.createMiner(source.id,linkId);
-                        break;
-                    }
+            if (minerCount < requiredMiners && MinerManager.canSpawnMiners(room)) {
+                // Récupérer l'assignation pour le prochain miner
+                let assignment = MinerManager.getNextMinerAssignment(room);
+                
+                if (assignment) {
+                    name = this.createMiner(assignment.sourceId, assignment.linkId);
                 }
             }
         }
@@ -85,19 +59,8 @@ StructureSpawn.prototype.spawnCreepsIfNecessary =
         // if none of the above caused a spawn command check for other roles
         if (name == undefined) {
             for (let role of listOfRoles) {
-                //console.log('check   ' + role)
-                //console.log('1      ' + this.memory.hasOwnProperty(this.memory.minCreeps))
-                //console.log('1      ' + JSON.stringify(this.memory.hasOwnProperty))
-                //console.log('2      ' + this.memory.hasOwnProperty(this.memory.minCreeps[role]))
-                //console.log('3      ' + numberOfCreeps[role] < this.memory.minCreeps[role])
-                
-                
-                
-                
-                
                 if (this.memory.hasOwnProperty(this.memory.minCreeps) && this.memory.hasOwnProperty(this.memory.minCreeps[role])
                          && numberOfCreeps[role] < this.memory.minCreeps[role]) {
-                    //console.log('grd if ok')
                     if (role == 'lorry') {
                         name = this.createLorry(150);
                     }
@@ -122,7 +85,6 @@ StructureSpawn.prototype.spawnCreepsIfNecessary =
 StructureSpawn.prototype.createCustomCreep =
     function (energy, roleName) {
         // create a balanced body as big as possible with the given energy
-        //var numberOfParts = Math.floor(energy / 200);
         var numberOfParts = 1;
         // make sure the creep is not too big (more than 50 parts)
         numberOfParts = Math.min(numberOfParts, Math.floor(50 / 3));
@@ -141,22 +103,20 @@ StructureSpawn.prototype.createCustomCreep =
         return this.spawnCreep(body, roleName + '_' + Game.time, { memory: { role: roleName, working: false }});
     };
 
-
-
 // create a new function for StructureSpawn
 StructureSpawn.prototype.createMiner =
-    function (sourceId,linkId) {
-        //return this.spawnCreep([CLAIM, MOVE], 'claimer_' + Game.time, {memory: { role: 'claimer', target: target }});
-        //return this.spawnCreep([WORK, WORK, WORK, WORK, WORK, MOVE], 'miner_' + Game.time,
-        return this.spawnCreep([WORK,WORK,WORK,WORK,WORK,WORK,CARRY,MOVE,MOVE], 'miner_' + Game.time,
-                                {memory: { role: 'miner', sourceId: sourceId, linkId:linkId }});
+    function (sourceId, linkId) {
+        // Utiliser le MinerManager pour créer le corps du miner
+        let body = MinerManager.createMinerBody(this.room.energyCapacityAvailable, 1.0);
+        
+        return this.spawnCreep(body, 'miner_' + Game.time,
+                                {memory: { role: 'miner', sourceId: sourceId, linkId: linkId }});
     };
 
 // create a new function for StructureSpawn
 StructureSpawn.prototype.createLorry =
     function (energy) {
         // create a body with twice as many CARRY as MOVE parts
-        //var numberOfParts = Math.floor(energy / 150);
         var numberOfParts = 2;
         // make sure the creep is not too big (more than 50 parts)
         numberOfParts = Math.min(numberOfParts, Math.floor(50 / 3));
@@ -171,6 +131,3 @@ StructureSpawn.prototype.createLorry =
         // create creep with the created body and the role 'lorry'
         return this.spawnCreep(body, 'lorry_' + Game.time, {memory: { role: 'lorry', working: false }});
     };
-	
-	
-	
