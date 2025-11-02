@@ -20,11 +20,6 @@ module.exports.loop = function() {
     // Récupérer le spawn principal
     let mainSpawn = Game.spawns[Object.keys(Game.spawns)[0]];
     
-    // ========== DIAGNOSTIC TEMPORAIRE ==========
-    if (Game.time % 50 == 0) {
-        require('debug.minerDiagnostic').run();
-    }
-    
     // ========== RAPPORT PÉRIODIQUE ==========
     if (Game.time % CONFIG.REPORT_INTERVAL == 0) {
         Reporter.generateReport(mainSpawn);
@@ -101,6 +96,11 @@ module.exports.loop = function() {
 // ========== FONCTION DE SPAWN ORCHESTRÉE ==========
 
 function spawnWithOrchestrator(spawn) {
+    
+    // Ne pas essayer de spawn si le spawn est occupé
+    if (spawn.spawning) {
+        return;
+    }
     
     // Comptage des creeps par rôle
     let creepCounts = {
@@ -195,14 +195,7 @@ function spawnWithOrchestrator(spawn) {
     // Spawn le creep le plus prioritaire
     if (spawnNeeds.length > 0) {
         let need = spawnNeeds[0];
-        if (Game.time % 10 == 0) {
-            console.log('[ORCHESTRATOR] Tentative spawn de: ' + need.role);
-        }
         spawnCreepByRole(spawn, need.role, phase);
-    } else {
-        if (Game.time % 10 == 0) {
-            console.log('[ORCHESTRATOR] Aucun besoin à spawner');
-        }
     }
 }
 
@@ -270,8 +263,6 @@ function getAdaptiveBody(energy, type, phase) {
 // ========== FONCTION DE SPAWN PAR RÔLE ==========
 
 function spawnCreepByRole(spawn, role, phase) {
-    console.log('[SPAWN] Début spawn de ' + role + ' en phase ' + phase);
-    
     let newName = role.charAt(0).toUpperCase() + role.slice(1) + '_' + Game.time;
     let body;
     let memory;
@@ -282,35 +273,28 @@ function spawnCreepByRole(spawn, role, phase) {
         availableEnergy = spawn.room.energyCapacityAvailable;
     }
     
-    console.log('[SPAWN] Énergie disponible: ' + availableEnergy);
-    
     switch(role) {
         case 'harvester':
-            console.log('[SPAWN] Case: harvester');
             body = getAdaptiveBody(availableEnergy, 'worker', phase);
             memory = { role: 'harvester', working: false };
             break;
             
         case 'upgrader':
-            console.log('[SPAWN] Case: upgrader');
             body = getAdaptiveBody(availableEnergy, 'worker', phase);
             memory = { role: 'upgrader', working: false };
             break;
             
         case 'builder':
-            console.log('[SPAWN] Case: builder');
             body = getAdaptiveBody(availableEnergy, 'worker', phase);
             memory = { role: 'builder', working: false };
             break;
             
         case 'lorry':
-            console.log('[SPAWN] Case: lorry');
             body = getAdaptiveBody(availableEnergy, 'lorry', phase);
             memory = { role: 'lorry', working: false };
             break;
             
         case 'miner':
-            console.log('[SPAWN] Case: miner');
             // Utiliser le MinerManager pour créer le corps et l'assignation
             let assignment = MinerManager.getNextMinerAssignment(spawn.room);
             
@@ -319,14 +303,10 @@ function spawnCreepByRole(spawn, role, phase) {
                 return;
             }
             
-            console.log('[SPAWN] Assignment trouvé: ' + assignment.sourceId);
-            
             body = MinerManager.createMinerBody(
                 availableEnergy, 
                 CONFIG.BODY_SIZE_MULTIPLIER.miner || 1.0
             );
-            
-            console.log('[SPAWN] Body créé: ' + body.length + ' parts');
             
             memory = {
                 role: 'miner',
@@ -359,17 +339,15 @@ function spawnCreepByRole(spawn, role, phase) {
     // Spawn le creep
     let result = spawn.spawnCreep(body, newName, { memory: memory });
     
-    console.log('[SPAWN] Résultat spawn: ' + result + ' (' + newName + ')');
-    
     if (result == OK) {
         console.log(`[${phase}] ✅ Spawning ${role}: ${newName}`);
         if (role === 'miner' && memory.sourceId) {
             console.log(`  └─ Assigné à source ${memory.sourceId}`);
         }
     } else if (result == ERR_NOT_ENOUGH_ENERGY) {
-        console.log(`[${phase}] ⚠️ Pas assez d'énergie pour ${role} (besoin: ${_.sum(body, p => BODYPART_COST[p])})`);
+        // Normal, on attendra le prochain tick
     } else if (result == ERR_BUSY) {
-        console.log(`[${phase}] ⏳ Spawn occupé`);
+        // Normal, spawn occupé
     } else {
         console.log(`[ERROR] ❌ Spawn failed for ${role}: ${result}`);
     }

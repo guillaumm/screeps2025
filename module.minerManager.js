@@ -113,30 +113,38 @@ module.exports = {
      * @returns {Array} Le corps du miner
      */
     createMinerBody: function(energy, multiplier = 1.0) {
-        // Corps basique d'un miner : [WORK x5, CARRY, MOVE x2]
-        // Coût : 550 energy
+        // Corps d'un miner : [WORK x N, CARRY, MOVE, MOVE]
         // Le CARRY permet de transférer vers un link
         // Les 2 MOVE permettent de se déplacer même chargé
         
-        if (energy < 550) {
-            // Corps minimal : [WORK x3, CARRY, MOVE]
-            return [WORK, WORK, WORK, CARRY, MOVE];
+        // Corps minimal : [WORK, WORK, WORK, CARRY, MOVE] = 350 energy
+        if (energy < 350) {
+            // Vraiment minimal : [WORK, WORK, CARRY, MOVE] = 300 energy
+            if (energy < 300) {
+                return [WORK, CARRY, MOVE]; // 250 energy
+            }
+            return [WORK, WORK, CARRY, MOVE]; // 300 energy
         }
         
-        // Calculer le nombre de WORK parts
-        // Formule : 5 WORK + 1 CARRY + 2 MOVE = 550 energy
-        // Pour chaque WORK supplémentaire : +100 energy
+        // Calculer combien de WORK parts on peut mettre
+        // Formule : WORK x N + CARRY (50) + MOVE (50) + MOVE (50) = energy
+        // Donc : N * 100 + 150 = energy
+        // N = (energy - 150) / 100
         
-        let workParts = 5;
-        let remainingEnergy = energy - 550;
+        let workParts = Math.floor((energy - 150) / 100);
         
-        // Ajouter des WORK parts avec l'énergie restante
-        let additionalWork = Math.floor(remainingEnergy / 100);
-        workParts += Math.floor(additionalWork * multiplier);
+        // Appliquer le multiplicateur
+        workParts = Math.floor(workParts * multiplier);
         
-        // Limiter à 20 WORK parts max (suffisant pour miner n'importe quelle source)
-        // Au-delà, c'est du gaspillage car source.energy max = 3000
-        workParts = Math.min(workParts, 20);
+        // Minimum 3 WORK, maximum 20 WORK
+        workParts = Math.max(3, Math.min(workParts, 20));
+        
+        // Vérifier que le coût total ne dépasse pas l'énergie disponible
+        let totalCost = workParts * 100 + 150; // WORK parts + CARRY + 2 MOVE
+        if (totalCost > energy) {
+            // Réduire le nombre de WORK parts
+            workParts = Math.floor((energy - 150) / 100);
+        }
         
         // Construire le corps
         let body = [];
