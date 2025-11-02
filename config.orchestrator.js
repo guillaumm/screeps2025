@@ -16,8 +16,8 @@ module.exports = {
         harvesters: 2,
         builders: 1,
         upgraders: 1,
-        miners: 0,
-        lorries: 0,
+        miners: 'auto',  // Permet de créer des miners dès qu'un container existe
+        lorries: 0,      // Pas de lorries au début, les harvesters font le job
         longDistanceHarvesters: 0
     },
     
@@ -26,8 +26,8 @@ module.exports = {
         harvesters: 1,  // Backup uniquement
         builders: 2,    // Plus de builders pour construire plus vite
         upgraders: 2,
-        miners: 'auto', // Auto = 1 par source (géré par prototype.spawn)
-        lorries: 1,     // On commence avec 1 lorry
+        miners: 'auto', // Auto = 1 par source avec container
+        lorries: 'auto', // Auto = 1 par miner (commence dès le 1er miner)
         longDistanceHarvesters: 0
     },
     

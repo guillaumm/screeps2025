@@ -53,7 +53,7 @@ module.exports.loop = function() {
         for (let i in storages) {
             tick_niveaux += " " + storages[i].structureType + i + " " + storages[i].store.energy;
         }
-        console.log("tick_niveaux " + tick_niveaux);
+        //console.log("tick_niveaux " + tick_niveaux);
         Memory.niveaux[0] += tick_niveaux;
     }
     
@@ -202,13 +202,15 @@ function spawnWithOrchestrator(spawn) {
 // ========== FONCTIONS DE DÉTECTION DE PHASE ==========
 
 function getPhase(minerCount, nbSources, containerCount, constructionSiteCount) {
-    // Phase BOOTSTRAP : Pas de miners, on démarre avec des harvesters
-    if (minerCount == 0) {
+    // Phase BOOTSTRAP : Pas de containers construits
+    // C'est le vrai critère de bootstrap : on n'a pas encore l'infrastructure
+    if (containerCount == 0) {
         return 'BOOTSTRAP';
     }
     
-    // Phase CONSTRUCTION : On a des miners mais pas tous les containers
-    if (minerCount < nbSources || containerCount < nbSources) {
+    // Phase CONSTRUCTION : On a des containers mais pas tous les miners
+    // OU on a des containers mais pas encore tous
+    if (minerCount < containerCount || containerCount < nbSources) {
         return 'CONSTRUCTION';
     }
     
