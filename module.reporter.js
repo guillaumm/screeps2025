@@ -46,6 +46,7 @@ module.exports = {
             harvesters: 0,
             upgraders: 0,
             builders: 0,
+            repairers: 0,
             miners: 0,
             lorries: 0,
             longDistanceHarvesters: 0,
@@ -80,6 +81,7 @@ module.exports = {
         console.log(`  Lorries:                 ${this.pad(creepCounts.lorries)} / ${this.formatQuota(quotas.lorries)}`);
         console.log(`  Upgraders:               ${this.pad(creepCounts.upgraders)} / ${this.formatQuota(quotas.upgraders)}`);
         console.log(`  Builders:                ${this.pad(creepCounts.builders)} / ${this.formatQuota(quotas.builders)}`);
+        console.log(`  Repairers:               ${this.pad(creepCounts.repairers)} / ${this.formatQuota(quotas.repairers)}`);
         console.log(`  Long Distance Harv.:     ${this.pad(creepCounts.longDistanceHarvesters)} / ${this.formatQuota(quotas.longDistanceHarvesters)}`);
         if (creepCounts.other > 0) {
             console.log(`  Autres:                  ${this.pad(creepCounts.other)}`);
@@ -200,6 +202,10 @@ module.exports = {
             filter: s => s.structureType == STRUCTURE_LINK
         });
         console.log(`  Links:                   ${links.length}`);
+        
+        // Réparations
+        const RepairManager = require('module.repairManager');
+        console.log(RepairManager.generateRepairReport(room));
     },
     
     /**

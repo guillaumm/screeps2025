@@ -15,7 +15,7 @@ module.exports = {
         let droppedEnergy = creep.pos.findClosestByRange(FIND_DROPPED_RESOURCES);
         
         // Chercher le container près de la source (range 2 au lieu de 1)
-        let container = source.pos.findInRange(FIND_STRUCTURES, 2, { 
+        let container = source.pos.findInRange(FIND_STRUCTURES, 1, { 
             filter: s => s.structureType == STRUCTURE_CONTAINER
         })[0];
         

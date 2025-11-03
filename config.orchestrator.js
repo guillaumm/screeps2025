@@ -18,6 +18,7 @@ module.exports = {
         upgraders: 1,
         miners: 'auto',  // Permet de créer des miners dès qu'un container existe
         lorries: 0,      // Pas de lorries au début, les harvesters font le job
+        repairers: 0,    // Pas de repairers dédiés, les builders réparent
         longDistanceHarvesters: 0
     },
     
@@ -28,6 +29,7 @@ module.exports = {
         upgraders: 2,
         miners: 'auto', // Auto = 1 par source avec container
         lorries: 'auto', // Auto = 1 par miner (commence dès le 1er miner)
+        repairers: 0,   // Les builders réparent en attendant
         longDistanceHarvesters: 0
     },
     
@@ -38,6 +40,7 @@ module.exports = {
         upgraders: 4,       // Focus sur l'upgrade
         miners: 'auto',     // Auto = 1 par source
         lorries: 'auto',    // Auto = 1 par miner
+        repairers: 1,       // 1 repairer dédié pour la maintenance
         longDistanceHarvesters: 2
     },
     
@@ -45,7 +48,7 @@ module.exports = {
     
     // Multiplicateur de taille des creeps (1 = normal, 2 = double, etc.)
     BODY_SIZE_MULTIPLIER: {
-        worker: 1.0,    // Pour upgraders, builders, harvesters
+        worker: 1.0,    // Pour upgraders, builders, harvesters, repairers
         lorry: 1.0,     // Pour les lorries
         miner: 1.0,     // Pour les miners
         ldh: 1.0        // Pour les long distance harvesters
@@ -57,9 +60,10 @@ module.exports = {
         harvesters: 1,      // Toujours en premier (backup)
         miners: 2,          // Puis miners (économie)
         lorries: 3,         // Puis lorries (transport)
-        upgraders: 4,       // Puis upgraders
-        builders: 5,        // Puis builders
-        longDistanceHarvesters: 6  // En dernier
+        repairers: 4,       // Puis repairers (maintenance)
+        upgraders: 5,       // Puis upgraders
+        builders: 6,        // Puis builders
+        longDistanceHarvesters: 7  // En dernier
     },
     
     // ========== RAPPORT ==========

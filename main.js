@@ -48,7 +48,7 @@ module.exports.loop = function() {
         for (let i in storages) {
             tick_niveaux += " " + storages[i].structureType + i + " " + storages[i].store.energy;
         }
-        //console.log("tick_niveaux " + tick_niveaux);
+        console.log("tick_niveaux " + tick_niveaux);
         Memory.niveaux[0] += tick_niveaux;
     }
     
@@ -107,6 +107,7 @@ function spawnWithOrchestrator(spawn) {
         harvesters: _.filter(Game.creeps, c => c.memory.role == 'harvester').length,
         upgraders: _.filter(Game.creeps, c => c.memory.role == 'upgrader').length,
         builders: _.filter(Game.creeps, c => c.memory.role == 'builder').length,
+        repairers: _.filter(Game.creeps, c => c.memory.role == 'repairer').length,
         miners: MinerManager.getMinerCount(spawn.room),
         lorries: _.filter(Game.creeps, c => c.memory.role == 'lorry').length,
         longDistanceHarvesters: _.sum(Game.creeps, c => 
@@ -154,8 +155,8 @@ function spawnWithOrchestrator(spawn) {
     
     // Debug: log des quotas
     if (Game.time % 10 == 0) {
-        console.log('[ORCHESTRATOR] Quotas - H:' + quotas.harvesters + ' M:' + minerQuota + ' L:' + lorryQuota + ' U:' + quotas.upgraders + ' B:' + quotas.builders);
-        console.log('[ORCHESTRATOR] Counts - H:' + creepCounts.harvesters + ' M:' + creepCounts.miners + ' L:' + creepCounts.lorries + ' U:' + creepCounts.upgraders + ' B:' + creepCounts.builders);
+        console.log('[ORCHESTRATOR] Quotas - H:' + quotas.harvesters + ' M:' + minerQuota + ' L:' + lorryQuota + ' R:' + quotas.repairers + ' U:' + quotas.upgraders + ' B:' + quotas.builders);
+        console.log('[ORCHESTRATOR] Counts - H:' + creepCounts.harvesters + ' M:' + creepCounts.miners + ' L:' + creepCounts.lorries + ' R:' + creepCounts.repairers + ' U:' + creepCounts.upgraders + ' B:' + creepCounts.builders);
     }
     
     // Ajouter les besoins à la liste
@@ -179,6 +180,9 @@ function spawnWithOrchestrator(spawn) {
     }
     if (creepCounts.builders < quotas.builders) {
         spawnNeeds.push({ role: 'builder', priority: CONFIG.SPAWN_PRIORITY.builders });
+    }
+    if (creepCounts.repairers < quotas.repairers) {
+        spawnNeeds.push({ role: 'repairer', priority: CONFIG.SPAWN_PRIORITY.repairers });
     }
     if (creepCounts.longDistanceHarvesters < quotas.longDistanceHarvesters) {
         spawnNeeds.push({ role: 'longDistanceHarvester', priority: CONFIG.SPAWN_PRIORITY.longDistanceHarvesters });
@@ -287,6 +291,11 @@ function spawnCreepByRole(spawn, role, phase) {
         case 'builder':
             body = getAdaptiveBody(availableEnergy, 'worker', phase);
             memory = { role: 'builder', working: false };
+            break;
+            
+        case 'repairer':
+            body = getAdaptiveBody(availableEnergy, 'worker', phase);
+            memory = { role: 'repairer', working: false };
             break;
             
         case 'lorry':

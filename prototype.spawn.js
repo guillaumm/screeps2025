@@ -3,7 +3,7 @@
 
 const MinerManager = require('module.minerManager');
 
-var listOfRoles = ['harvester','longDistanceHarvester', 'upgrader', 'lorry', 'builder', 'miner'];
+var listOfRoles = ['harvester','longDistanceHarvester', 'upgrader', 'lorry', 'builder', 'repairer', 'miner'];
 
 // create a new function for StructureSpawn
 StructureSpawn.prototype.spawnCreepsIfNecessary =
