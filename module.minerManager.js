@@ -1,7 +1,10 @@
 /*
-Module de gestion des Miners
+Module de gestion des Miners - Version refactorée
 Gère l'assignation des miners aux sources et la détection des containers/links
+Utilise la configuration centralisée
 */
+
+const CONFIG = require('config.orchestrator');
 
 module.exports = {
     
@@ -34,15 +37,20 @@ module.exports = {
             }
             
             if (!assignedMiner && !spawningMiner) {
-                // Chercher un container près de la source
-                let containers = source.pos.findInRange(FIND_STRUCTURES, 2, {
+                // Chercher un container près de la source (utilise la config)
+                let containers = source.pos.findInRange(FIND_STRUCTURES, 
+                    CONFIG.MINER_CONFIG.maxContainerRange, {
                     filter: s => s.structureType == STRUCTURE_CONTAINER
                 });
                 
-                // Chercher un link près de la source
-                let links = source.pos.findInRange(FIND_STRUCTURES, 2, {
-                    filter: s => s.structureType == STRUCTURE_LINK
-                });
+                // Chercher un link près de la source (si configuré)
+                let links = [];
+                if (CONFIG.MINER_CONFIG.useLinksIfAvailable) {
+                    links = source.pos.findInRange(FIND_STRUCTURES, 
+                        CONFIG.MINER_CONFIG.maxContainerRange, {
+                        filter: s => s.structureType == STRUCTURE_LINK
+                    });
+                }
                 
                 // On ne crée un miner que s'il y a un container
                 if (containers.length > 0) {
@@ -107,7 +115,7 @@ module.exports = {
     },
     
     /**
-     * Crée le corps d'un miner selon l'énergie disponible
+     * Crée le corps d'un miner selon l'énergie disponible (utilise la config)
      * @param {number} energy - Énergie disponible
      * @param {number} multiplier - Multiplicateur de taille (depuis config)
      * @returns {Array} Le corps du miner
@@ -119,7 +127,6 @@ module.exports = {
         
         // Corps minimal : [WORK, WORK, WORK, CARRY, MOVE] = 350 energy
         if (energy < 350) {
-            // Vraiment minimal : [WORK, WORK, CARRY, MOVE] = 300 energy
             if (energy < 300) {
                 return [WORK, CARRY, MOVE]; // 250 energy
             }
@@ -136,13 +143,15 @@ module.exports = {
         // Appliquer le multiplicateur
         workParts = Math.floor(workParts * multiplier);
         
-        // Minimum 3 WORK, maximum 20 WORK
-        workParts = Math.max(3, Math.min(workParts, 20));
+        // Utiliser les limites depuis la config
+        workParts = Math.max(
+            CONFIG.MINER_CONFIG.minWorkParts, 
+            Math.min(workParts, CONFIG.MINER_CONFIG.maxWorkParts)
+        );
         
         // Vérifier que le coût total ne dépasse pas l'énergie disponible
-        let totalCost = workParts * 100 + 150; // WORK parts + CARRY + 2 MOVE
+        let totalCost = workParts * 100 + 150;
         if (totalCost > energy) {
-            // Réduire le nombre de WORK parts
             workParts = Math.floor((energy - 150) / 100);
         }
         
@@ -166,7 +175,7 @@ module.exports = {
         let miners = _.filter(Game.creeps, c => c.memory.role == 'miner' && c.room.name == room.name);
         let needs = this.analyzeMinerNeeds(room);
         
-        let report = '\n  📍 ASSIGNATION DES MINERS:\n';
+        let report = '\n  🔍 ASSIGNATION DES MINERS:\n';
         
         for (let i = 0; i < sources.length; i++) {
             let source = sources[i];
@@ -198,7 +207,8 @@ module.exports = {
         let containersCount = 0;
         
         for (let source of sources) {
-            let containers = source.pos.findInRange(FIND_STRUCTURES, 2, {
+            let containers = source.pos.findInRange(FIND_STRUCTURES, 
+                CONFIG.MINER_CONFIG.maxContainerRange, {
                 filter: s => s.structureType == STRUCTURE_CONTAINER
             });
             if (containers.length > 0) {

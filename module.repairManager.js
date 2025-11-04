@@ -1,7 +1,10 @@
 /*
-Module de gestion des réparations
+Module de gestion des réparations - Version refactorée
 Identifie les structures à réparer et priorise les réparations
+Utilise la configuration centralisée
 */
+
+const CONFIG = require('config.orchestrator');
 
 module.exports = {
     
@@ -12,10 +15,10 @@ module.exports = {
      * @returns {Structure|null} La structure à réparer ou null
      */
     findRepairTarget: function(room, creep = null) {
+        
         // Structures critiques : celles qui vont bientôt casser
         let criticalStructures = room.find(FIND_STRUCTURES, {
             filter: (s) => {
-                // Ignorer les structures indestructibles
                 if (!s.hits || !s.hitsMax) return false;
                 
                 // Ignorer les walls et ramparts (gérés séparément)
@@ -23,8 +26,8 @@ module.exports = {
                     return false;
                 }
                 
-                // Critique si < 25% HP
-                return s.hits < s.hitsMax * 0.25;
+                // Critique si < seuil configuré
+                return s.hits < s.hitsMax * CONFIG.REPAIR_CONFIG.criticalThreshold;
             }
         });
         
@@ -46,8 +49,8 @@ module.exports = {
                     return false;
                 }
                 
-                // Endommagé si < 75% HP
-                return s.hits < s.hitsMax * 0.75;
+                // Endommagé si < seuil configuré
+                return s.hits < s.hitsMax * CONFIG.REPAIR_CONFIG.damagedThreshold;
             }
         });
         
@@ -101,10 +104,15 @@ module.exports = {
     /**
      * Trouve un wall ou rampart à réparer (maintenance défensive)
      * @param {Room} room - La room
-     * @param {number} maxHits - HP maximum à atteindre
+     * @param {number} maxHits - HP maximum à atteindre (depuis config par défaut)
      * @returns {Structure|null}
      */
-    findWallToRepair: function(room, maxHits = 10000) {
+    findWallToRepair: function(room, maxHits = null) {
+        // Utiliser la config si maxHits n'est pas fourni
+        if (maxHits === null) {
+            maxHits = CONFIG.REPAIR_CONFIG.maxWallHits;
+        }
+        
         let walls = room.find(FIND_STRUCTURES, {
             filter: (s) => {
                 return (s.structureType == STRUCTURE_WALL || s.structureType == STRUCTURE_RAMPART)
@@ -133,8 +141,8 @@ module.exports = {
         
         let stats = {
             total: 0,
-            critical: 0,     // < 25% HP
-            damaged: 0,      // < 75% HP
+            critical: 0,     // < seuil critique configuré
+            damaged: 0,      // < seuil endommagé configuré
             byType: {}
         };
         
@@ -148,9 +156,9 @@ module.exports = {
             
             let hpPercent = structure.hits / structure.hitsMax;
             
-            if (hpPercent < 0.25) {
+            if (hpPercent < CONFIG.REPAIR_CONFIG.criticalThreshold) {
                 stats.critical++;
-            } else if (hpPercent < 0.75) {
+            } else if (hpPercent < CONFIG.REPAIR_CONFIG.damagedThreshold) {
                 stats.damaged++;
             }
             
@@ -160,7 +168,7 @@ module.exports = {
                 stats.byType[type] = { total: 0, damaged: 0 };
             }
             stats.byType[type].total++;
-            if (hpPercent < 0.75) {
+            if (hpPercent < CONFIG.REPAIR_CONFIG.damagedThreshold) {
                 stats.byType[type].damaged++;
             }
         }

@@ -1,6 +1,6 @@
 /*
 Configuration centralisée de l'orchestrateur
-Ce fichier contient tous les paramètres pour piloter la création de creeps
+Version 2.0 - Toutes les "manettes" regroupées ici
 */
 
 module.exports = {
@@ -11,81 +11,158 @@ module.exports = {
     
     // ========== QUOTAS DE CREEPS PAR PHASE ==========
     
-    // Phase BOOTSTRAP : Démarrage minimal
     BOOTSTRAP: {
         harvesters: 2,
-        builders: 1,
-        upgraders: 1,
-        miners: 'auto',  // Permet de créer des miners dès qu'un container existe
-        lorries: 0,      // Pas de lorries au début, les harvesters font le job
-        repairers: 0,    // Pas de repairers dédiés, les builders réparent
-        longDistanceHarvesters: 0
-    },
-    
-    // Phase CONSTRUCTION : Infrastructure
-    CONSTRUCTION: {
-        harvesters: 1,  // Backup uniquement
-        builders: 2,    // Plus de builders pour construire plus vite
+        builders: 2,
         upgraders: 2,
-        miners: 'auto', // Auto = 1 par source avec container
-        lorries: 'auto', // Auto = 1 par miner (commence dès le 1er miner)
-        repairers: 0,   // Les builders réparent en attendant
+        miners: 'auto',
+        lorries: 0,
+        repairers: 0,
         longDistanceHarvesters: 0
     },
     
-    // Phase PRODUCTION : Système complet
+    CONSTRUCTION: {
+        harvesters: 1,
+        builders: 2,
+        upgraders: 2,
+        miners: 'auto',
+        lorries: 'auto',
+        repairers: 0,
+        longDistanceHarvesters: 0
+    },
+    
     PRODUCTION: {
-        harvesters: 0,      // Plus besoin, les miners prennent le relais
-        builders: 1,        // Maintenance uniquement
-        upgraders: 4,       // Focus sur l'upgrade
-        miners: 'auto',     // Auto = 1 par source
-        lorries: 'auto',    // Auto = 1 par miner
-        repairers: 1,       // 1 repairer dédié pour la maintenance
+        harvesters: 0,
+        builders: 1,
+        upgraders: 4,
+        miners: 'auto',
+        lorries: 'auto',
+        repairers: 1,
         longDistanceHarvesters: 2
+    },
+    
+    // ========== COMPORTEMENT DES CREEPS ==========
+    
+    CREEP_BEHAVIOR: {
+        // Les workers (builders, upgraders, repairers) récoltent aux sources directement
+        // uniquement si on n'a pas assez de miners
+        workersUseSourcesWhenNoMiners: true,
+        
+        // Les harvesters récoltent TOUJOURS aux sources (rôle de backup)
+        harvestersAlwaysUseSources: true,
+        
+        // Les upgraders utilisent le link dédié s'il existe
+        upgradersUseDedicatedLink: true,
+        
+        // Index du link dédié aux upgraders dans la liste des links
+        // null = désactivé, 0 = premier link, 1 = deuxième link, etc.
+        upgraderLinkIndex: 1,
+        
+        // Les lorries peuvent déposer dans les links
+        lorriesDepositToLinks: false,
+        
+        // Les lorries ramassent l'énergie tombée au sol
+        lorriesPickupDroppedEnergy: true,
+        
+        // Les lorries récupèrent des tombes
+        lorriesLootTombstones: true,
+        
+        // Seuil minimum d'énergie dans un container pour qu'un lorry y récupère
+        lorryMinContainerEnergy: 100
+    },
+    
+    // ========== COMPORTEMENT DES TOURS ==========
+    
+    TOWER_BEHAVIOR: {
+        // Les tours ne réparent que si on a assez de miners (économie d'énergie)
+        repairOnlyWithMiners: true,
+        
+        // Seuil d'énergie minimum pour qu'une tour répare (%)
+        minEnergyPercentToRepair: 0.5  // 50%
+    },
+    
+    // ========== MINERS ==========
+    
+    MINER_CONFIG: {
+        // Nombre minimum de WORK parts par miner
+        minWorkParts: 3,
+        
+        // Nombre maximum de WORK parts par miner
+        maxWorkParts: 20,
+        
+        // Distance maximale entre source et container pour créer un miner
+        maxContainerRange: 2,
+        
+        // Les miners transfèrent vers un link s'il existe
+        useLinksIfAvailable: true
+    },
+    
+    // ========== RÉPARATIONS ==========
+    
+    REPAIR_CONFIG: {
+        // Seuil HP pour considérer une structure comme "critique" (%)
+        criticalThreshold: 0.25,  // 25%
+        
+        // Seuil HP pour considérer une structure comme "endommagée" (%)
+        damagedThreshold: 0.75,   // 75%
+        
+        // HP maximum pour les walls/ramparts (réparation progressive)
+        maxWallHits: 50000,
+        
+        // Les builders réparent automatiquement s'il n'y a pas de construction
+        buildersAutoRepair: true
     },
     
     // ========== CONFIGURATION DES CORPS ==========
     
-    // Multiplicateur de taille des creeps (1 = normal, 2 = double, etc.)
     BODY_SIZE_MULTIPLIER: {
-        worker: 1.0,    // Pour upgraders, builders, harvesters, repairers
-        lorry: 1.0,     // Pour les lorries
-        miner: 1.0,     // Pour les miners
-        ldh: 1.0        // Pour les long distance harvesters
+        worker: 1.0,
+        lorry: 1.0,
+        miner: 1.0,
+        ldh: 1.0
     },
     
     // ========== PRIORITÉS DE SPAWN ==========
-    // Ordre dans lequel les creeps sont créés (1 = priorité max)
+    
     SPAWN_PRIORITY: {
-        harvesters: 1,      // Toujours en premier (backup)
-        miners: 2,          // Puis miners (économie)
-        lorries: 3,         // Puis lorries (transport)
-        repairers: 4,       // Puis repairers (maintenance)
-        upgraders: 5,       // Puis upgraders
-        builders: 6,        // Puis builders
-        longDistanceHarvesters: 7  // En dernier
+        harvesters: 1,
+        upgraders: 2,
+        builders: 3,
+        miners: 4,
+        lorries: 5,
+        repairers: 6,
+        longDistanceHarvesters: 7
+    },
+    
+    // ========== ÉNERGIE ET SPAWN ==========
+    
+    ENERGY_CONFIG: {
+        // Pourcentage minimum d'énergie avant de spawn un creep non-urgent
+        minPercentForSpawn: {
+            BOOTSTRAP: 0.0,      // Toujours spawn en bootstrap
+            CONSTRUCTION: 0.3,   // 30% minimum
+            PRODUCTION: 0.5      // 50% minimum
+        },
+        
+        // Utiliser energyCapacityAvailable au lieu de energyAvailable en production
+        useMaxEnergyInProduction: true,
+        
+        // Énergie minimum dans un container pour qu'un creep y récolte
+        minContainerEnergy: 100
     },
     
     // ========== RAPPORT ==========
-    REPORT_INTERVAL: 300,  // Intervalle en ticks (300 = 5 minutes à vitesse normale)
+    
+    REPORT_INTERVAL: 100,
     
     // ========== OPTIONS AVANCÉES ==========
     
-    // Utiliser energyCapacityAvailable au lieu de energyAvailable en production
-    USE_MAX_ENERGY_IN_PRODUCTION: true,
+    USE_MANUAL_SPAWN: true,
     
-    // Pourcentage minimum d'énergie avant de spawn un creep non-urgent
-    MIN_ENERGY_PERCENT_FOR_SPAWN: 0.5,  // 50%
-    
-    // Activer le spawn manuel (main.js) ou automatique (prototype.spawn)
-    USE_MANUAL_SPAWN: true,  // true = main.js, false = prototype.spawn
-    
-    // ========== MÉTHODE HELPER ==========
+    // ========== MÉTHODES HELPER ==========
     
     /**
      * Récupère les quotas pour une phase donnée
-     * @param {string} phase - 'BOOTSTRAP', 'CONSTRUCTION', ou 'PRODUCTION'
-     * @returns {Object} Les quotas de creeps
      */
     getQuotasForPhase: function(phase) {
         return this[phase] || this.PRODUCTION;
@@ -93,20 +170,103 @@ module.exports = {
     
     /**
      * Calcule le nombre de lorries nécessaires
-     * @param {number} minerCount - Nombre de miners actuels
-     * @returns {number} Nombre de lorries nécessaires
      */
     calculateLorryCount: function(minerCount) {
         return Math.max(1, Math.ceil(minerCount * 1.0));
     },
     
     /**
-     * Vérifie si on a assez d'énergie pour spawn
-     * @param {Room} room - La room
-     * @returns {boolean}
+     * Vérifie si on a assez d'énergie pour spawn selon la phase
      */
-    hasEnoughEnergyToSpawn: function(room) {
+    hasEnoughEnergyToSpawn: function(room, phase) {
         let energyPercent = room.energyAvailable / room.energyCapacityAvailable;
-        return energyPercent >= this.MIN_ENERGY_PERCENT_FOR_SPAWN;
+        let threshold = this.ENERGY_CONFIG.minPercentForSpawn[phase] || 0.5;
+        return energyPercent >= threshold;
+    },
+    
+    /**
+     * Vérifie si on a assez de miners pour l'économie avancée
+     */
+    hasEnoughMiners: function(room) {
+        const MinerManager = require('module.minerManager');
+        let minerCount = MinerManager.getMinerCount(room);
+        let requiredMiners = MinerManager.getRequiredMinerCount(room);
+        return minerCount >= requiredMiners;
+    },
+    
+    /**
+     * Récupère le link dédié aux upgraders s'il existe
+     */
+    getUpgraderLink: function(room) {
+        if (!this.CREEP_BEHAVIOR.upgradersUseDedicatedLink) {
+            return null;
+        }
+        
+        let linkList = _.filter(Game.structures, s => 
+            s.structureType == STRUCTURE_LINK && 
+            s.room.name == room.name
+        );
+        
+        let index = this.CREEP_BEHAVIOR.upgraderLinkIndex;
+        if (index !== null && linkList.length > index) {
+            return linkList[index];
+        }
+        
+        return null;
+    },
+    
+    /**
+     * Détermine si un creep doit utiliser les sources directement
+     */
+    shouldUseSourcesDirectly: function(creep, room) {
+        // Les harvesters récoltent toujours aux sources
+        if (creep.memory.role == 'harvester' && 
+            this.CREEP_BEHAVIOR.harvestersAlwaysUseSources) {
+            return true;
+        }
+        
+        // Les workers peuvent récolter aux sources si pas assez de miners
+        if (this.CREEP_BEHAVIOR.workersUseSourcesWhenNoMiners && 
+            !this.hasEnoughMiners(room)) {
+            return true;
+        }
+        
+        return false;
+    },
+    
+    /**
+     * Vérifie si une tour doit réparer
+     */
+    shouldTowerRepair: function(tower) {
+        // Vérifier le seuil d'énergie
+        let energyPercent = tower.store[RESOURCE_ENERGY] / tower.store.getCapacity(RESOURCE_ENERGY);
+        if (energyPercent < this.TOWER_BEHAVIOR.minEnergyPercentToRepair) {
+            return false;
+        }
+        
+        // Vérifier les miners si configuré
+        if (this.TOWER_BEHAVIOR.repairOnlyWithMiners) {
+            return this.hasEnoughMiners(tower.room);
+        }
+        
+        return true;
+    },
+    
+    /**
+     * Obtient les structures cibles pour les lorries
+     */
+    getLorryDepositTargets: function() {
+        let targets = [
+            STRUCTURE_SPAWN,
+            STRUCTURE_EXTENSION,
+            STRUCTURE_STORAGE,
+            STRUCTURE_TOWER
+        ];
+        
+        if (this.CREEP_BEHAVIOR.lorriesDepositToLinks) {
+            targets.push(STRUCTURE_LINK);
+        }
+        
+        return targets;
     }
 };

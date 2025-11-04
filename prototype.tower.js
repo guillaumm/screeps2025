@@ -1,30 +1,30 @@
-// prototype.tower
-	
-// create a new function for StructureTower
-StructureTower.prototype.defend =
-    function () {
-        // find closest hostile creep
-        let target = this.pos.findClosestByRange(FIND_HOSTILE_CREEPS);
-        
-        // if one is found...
-        if (target != undefined) {
-            // ...FIRE!
-            this.attack(target);
-        }
-        else {
-            // Récupérer le nombre de sources dans la room de la tour
-            let nbSources = this.room.find(FIND_SOURCES).length;
-            let miners = _.filter(Game.creeps, (creep) => creep.memory.role == 'miner');
+// prototype.tower - Version refactorée avec configuration centralisée
+
+const CONFIG = require('config.orchestrator');
+
+// Créer une fonction pour StructureTower
+StructureTower.prototype.defend = function() {
+    
+    // Chercher un creep hostile proche
+    let target = this.pos.findClosestByRange(FIND_HOSTILE_CREEPS);
+    
+    // Si un ennemi est trouvé...
+    if (target != undefined) {
+        // ...FIRE!
+        this.attack(target);
+    }
+    else {
+        // Pas d'ennemi : vérifier si on doit réparer
+        if (CONFIG.shouldTowerRepair(this)) {
             
-            // Seulement réparer si on a assez de miners (économie d'énergie)
-            if (miners.length >= nbSources) {
-                let damagedStructure = this.pos.findClosestByPath(FIND_STRUCTURES, {
-                    filter: (s) => s.hits < s.hitsMax
-                });
-                
-                if (damagedStructure != undefined) {
-                    this.repair(damagedStructure);
-                }
+            // Chercher une structure endommagée
+            let damagedStructure = this.pos.findClosestByPath(FIND_STRUCTURES, {
+                filter: (s) => s.hits && s.hitsMax && s.hits < s.hitsMax
+            });
+            
+            if (damagedStructure != undefined) {
+                this.repair(damagedStructure);
             }
         }
-    };
+    }
+};

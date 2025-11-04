@@ -1,5 +1,7 @@
-// role.repairer - Rôle dédié aux réparations
+// role.repairer - Version refactorée avec configuration centralisée
+
 const RepairManager = require('module.repairManager');
+const CONFIG = require('config.orchestrator');
 var roleUpgrader = require('role.upgrader');
 
 module.exports = {
@@ -17,11 +19,11 @@ module.exports = {
 
         // Si le creep doit réparer
         if (creep.memory.working == true) {
-            // Si on a déjà une cible de réparation en mémoire, la vérifier
+            
+            // Vérifier/récupérer la cible de réparation en mémoire
             let repairTarget = null;
             if (creep.memory.repairTarget) {
                 repairTarget = Game.getObjectById(creep.memory.repairTarget);
-                // Vérifier si la cible est toujours valide
                 if (repairTarget && repairTarget.hits >= repairTarget.hitsMax) {
                     repairTarget = null;
                     creep.memory.repairTarget = null;
@@ -43,7 +45,10 @@ module.exports = {
                 }
             } else {
                 // Si rien à réparer, regarder les walls/ramparts
-                let wallTarget = RepairManager.findWallToRepair(creep.room, 50000);
+                let wallTarget = RepairManager.findWallToRepair(
+                    creep.room, 
+                    CONFIG.REPAIR_CONFIG.maxWallHits
+                );
                 
                 if (wallTarget) {
                     if (creep.repair(wallTarget) == ERR_NOT_IN_RANGE) {
@@ -57,18 +62,9 @@ module.exports = {
         }
         // Si le creep doit récupérer de l'énergie
         else {
-            // Vérifier combien de miners existent
-            let miners = _.filter(Game.creeps, (c) => c.memory.role == 'miner');
-            let nbSources = creep.room.find(FIND_SOURCES).length;
-            
-            // Si on a assez de miners, ne pas récolter directement aux sources
-            if (miners.length >= nbSources) {
-                creep.getEnergy(true, false);  // Containers/Storage uniquement
-            }
-            // Sinon, récolter aux sources
-            else {
-                creep.getEnergy(true, true);  // Containers/Storage ET sources
-            }
+            // Utiliser la configuration pour déterminer si on récolte aux sources
+            let useSource = CONFIG.shouldUseSourcesDirectly(creep, creep.room);
+            creep.getEnergy(true, useSource);
         }
     }
 };

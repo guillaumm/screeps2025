@@ -1,42 +1,30 @@
-// role.upgrader
+// role.upgrader - Version refactorée avec configuration centralisée
+
+const CONFIG = require('config.orchestrator');
 
 module.exports = {
-    // a function to run the logic for this role
     /** @param {Creep} creep */
     run: function(creep) {
-        // if creep is bringing energy to the controller but has no energy left
+        
+        // Gestion des états
         if (creep.memory.working == true && creep.carry.energy <= 3) {
-            // switch state
             creep.memory.working = false;
         }
-        // if creep is harvesting energy but is full
         else if (creep.memory.working == false && creep.carry.energy == creep.carryCapacity) {
-            // switch state
             creep.memory.working = true;
         }
 
-        // if creep is supposed to transfer energy to the controller
+        // Si le creep doit upgrader le controller
         if (creep.memory.working == true) {
-            // try to upgrade the controller
             if (creep.upgradeController(creep.room.controller) == ERR_NOT_IN_RANGE) {
-                // if not in range, move towards the controller
                 creep.moveTo(creep.room.controller, {reusePath: 15});
             }
         }
-        // if creep is supposed to get energy
+        // Si le creep doit récupérer de l'énergie
         else if (creep.memory.working == false) {
-            // Vérifier combien de miners existent
-            let miners = _.filter(Game.creeps, (c) => c.memory.role == 'miner');
-            let nbSources = creep.room.find(FIND_SOURCES).length;
-            
-            // Si on a assez de miners, utiliser containers/storage uniquement
-            if (miners.length >= nbSources) {
-                creep.getEnergy(true, false);
-            }
-            // Sinon (phase bootstrap/construction), aussi récolter aux sources
-            else {
-                creep.getEnergy(true, true);
-            }
+            // Utiliser la configuration pour déterminer si on récolte aux sources
+            let useSource = CONFIG.shouldUseSourcesDirectly(creep, creep.room);
+            creep.getEnergy(true, useSource);
         }
     }
 };

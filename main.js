@@ -1,6 +1,6 @@
 /*
-Version refactorisée avec système de phases de démarrage
-+ Orchestrateur configurable
+Version refactorée avec système de phases de démarrage
++ Orchestrateur configurable avec seuils d'énergie par phase
 + Système de rapport automatique
 + Gestion centralisée des miners
 */
@@ -35,7 +35,7 @@ module.exports.loop = function() {
         Memory.niveaux = [""];
     }
     
-    // Log périodique des niveaux d'énergie (gardé pour compatibilité)
+    // Log périodique des niveaux d'énergie
     if (Game.time % 20 == 0) {
         const storages = mainSpawn.room.find(FIND_STRUCTURES, {
             filter: s => (
@@ -136,8 +136,8 @@ function spawnWithOrchestrator(spawn) {
         console.log("Sites de construction: " + constructionSites.length);
     }
     
-    // Vérifier si on a assez d'énergie pour spawn (sauf en bootstrap)
-    if (!CONFIG.hasEnoughEnergyToSpawn(spawn.room) && phase !== 'BOOTSTRAP') {
+    // Vérifier si on a assez d'énergie pour spawn (utilise le seuil par phase)
+    if (!CONFIG.hasEnoughEnergyToSpawn(spawn.room, phase)) {
         return;
     }
     
@@ -207,13 +207,11 @@ function spawnWithOrchestrator(spawn) {
 
 function getPhase(minerCount, nbSources, containerCount, constructionSiteCount) {
     // Phase BOOTSTRAP : Pas de containers construits
-    // C'est le vrai critère de bootstrap : on n'a pas encore l'infrastructure
     if (containerCount == 0) {
         return 'BOOTSTRAP';
     }
     
     // Phase CONSTRUCTION : On a des containers mais pas tous les miners
-    // OU on a des containers mais pas encore tous
     if (minerCount < containerCount || containerCount < nbSources) {
         return 'CONSTRUCTION';
     }
@@ -229,7 +227,7 @@ function getAdaptiveBody(energy, type, phase) {
     let multiplier = CONFIG.BODY_SIZE_MULTIPLIER[type] || 1.0;
     
     if (type == 'worker') {
-        // Pour builder, upgrader, harvester : pattern [WORK, CARRY, MOVE]
+        // Pour builder, upgrader, harvester, repairer : pattern [WORK, CARRY, MOVE]
         // Coût : 200 par unité
         if (energy < 200) return [WORK, CARRY, MOVE]; // Minimum
         
@@ -273,7 +271,7 @@ function spawnCreepByRole(spawn, role, phase) {
     
     // Déterminer l'énergie disponible
     let availableEnergy = spawn.room.energyAvailable;
-    if (phase === 'PRODUCTION' && CONFIG.USE_MAX_ENERGY_IN_PRODUCTION) {
+    if (phase === 'PRODUCTION' && CONFIG.ENERGY_CONFIG.useMaxEnergyInProduction) {
         availableEnergy = spawn.room.energyCapacityAvailable;
     }
     
