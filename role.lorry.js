@@ -1,4 +1,4 @@
-// role.lorry - Version refactorée avec configuration centralisée
+// role.lorry - Version corrigée avec gestion appropriée des structures
 
 const CONFIG = require('config.orchestrator');
 
@@ -17,24 +17,66 @@ module.exports = {
         // Si le creep doit transférer de l'énergie
         if (creep.memory.working == true) {
             
+            // Vérifier si on a assez d'énergie pour déposer
+            if (creep.carry.energy < CONFIG.LORRY_BEHAVIOR.minEnergyToDeposit) {
+                return; // Attendre d'avoir plus d'énergie
+            }
+            
             // Obtenir les types de structures cibles depuis la config
             let targetTypes = CONFIG.getLorryDepositTargets();
             
-            // Chercher la structure la plus proche qui a besoin d'énergie
-            var structure = creep.pos.findClosestByPath(FIND_MY_STRUCTURES, {
-                filter: (s) => targetTypes.includes(s.structureType) && 
-                               s.energy < s.energyCapacity
-            });
-
-            // Si aucune structure trouvée, essayer le storage
-            if (structure == undefined) {
-                structure = creep.room.storage;
+            // 🔧 FIX: Utiliser la méthode qui gère les deux types de structures
+            var structure;
+            
+            if (CONFIG.LORRY_BEHAVIOR.prioritizeSpawnExtension) {
+                // Prioriser spawn et extensions
+                structure = creep.pos.findClosestByPath(FIND_MY_STRUCTURES, {
+                    filter: (s) => (
+                        s.structureType == STRUCTURE_SPAWN ||
+                        s.structureType == STRUCTURE_EXTENSION ||
+                        s.structureType == STRUCTURE_TOWER
+                    ) && CONFIG.hasSpaceForEnergy(s)
+                });
+                
+                // Si rien trouvé, chercher storage/links
+                if (!structure) {
+                    structure = creep.pos.findClosestByPath(FIND_MY_STRUCTURES, {
+                        filter: (s) => targetTypes.includes(s.structureType) && 
+                                       CONFIG.hasSpaceForEnergy(s)
+                    });
+                }
+            } else {
+                // Chercher la cible la plus proche de tous types
+                if (CONFIG.LORRY_BEHAVIOR.preferClosestTarget) {
+                    structure = creep.pos.findClosestByPath(FIND_MY_STRUCTURES, {
+                        filter: (s) => targetTypes.includes(s.structureType) && 
+                                       CONFIG.hasSpaceForEnergy(s)
+                    });
+                } else {
+                    // Chercher la structure la plus vide
+                    let candidates = creep.room.find(FIND_MY_STRUCTURES, {
+                        filter: (s) => targetTypes.includes(s.structureType) && 
+                                       CONFIG.hasSpaceForEnergy(s)
+                    });
+                    
+                    if (candidates.length > 0) {
+                        candidates.sort((a, b) => 
+                            CONFIG.getEnergyPercent(a) - CONFIG.getEnergyPercent(b)
+                        );
+                        structure = candidates[0];
+                    }
+                }
             }
 
             // Si on a trouvé une cible
             if (structure != undefined) {
                 if (creep.transfer(structure, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
                     creep.moveTo(structure);
+                }
+            } else if (CONFIG.LORRY_BEHAVIOR.returnToStorageWhenFull && creep.room.storage) {
+                // Retourner au storage si tout est plein
+                if (creep.transfer(creep.room.storage, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
+                    creep.moveTo(creep.room.storage);
                 }
             }
         }

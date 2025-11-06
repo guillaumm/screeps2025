@@ -1,6 +1,6 @@
 /*
-Configuration centralisée de l'orchestrateur
-Version 2.0 - Toutes les "manettes" regroupées ici
+Configuration centralisée de l'orchestrateur v2
+Toutes les manettes pour une gestion intelligente future
 */
 
 module.exports = {
@@ -44,73 +44,133 @@ module.exports = {
     // ========== COMPORTEMENT DES CREEPS ==========
     
     CREEP_BEHAVIOR: {
-        // Les workers (builders, upgraders, repairers) récoltent aux sources directement
-        // uniquement si on n'a pas assez de miners
         workersUseSourcesWhenNoMiners: true,
-        
-        // Les harvesters récoltent TOUJOURS aux sources (rôle de backup)
         harvestersAlwaysUseSources: true,
-        
-        // Les upgraders utilisent le link dédié s'il existe
         upgradersUseDedicatedLink: true,
-        
-        // Index du link dédié aux upgraders dans la liste des links
-        // null = désactivé, 0 = premier link, 1 = deuxième link, etc.
         upgraderLinkIndex: 1,
-        
-        // Les lorries peuvent déposer dans les links
         lorriesDepositToLinks: false,
-        
-        // Les lorries ramassent l'énergie tombée au sol
         lorriesPickupDroppedEnergy: true,
-        
-        // Les lorries récupèrent des tombes
         lorriesLootTombstones: true,
-        
-        // Seuil minimum d'énergie dans un container pour qu'un lorry y récupère
         lorryMinContainerEnergy: 100
+    },
+    
+    // ========== COMPORTEMENT DES LORRIES ==========
+    
+    LORRY_BEHAVIOR: {
+        // Prioriser spawn et extensions avant storage
+        prioritizeSpawnExtension: true,
+        
+        // Énergie minimum avant de déposer (évite les petits trajets)
+        minEnergyToDeposit: 50,
+        
+        // Préférer la cible la plus proche (true) ou la plus vide (false)
+        preferClosestTarget: true,
+        
+        // Retourner au storage quand plein si rien d'autre à remplir
+        returnToStorageWhenFull: true,
+        
+        // Distance max pour considérer une cible (null = pas de limite)
+        maxTargetDistance: null
+    },
+    
+    // ========== COMPORTEMENT DES HARVESTERS ==========
+    
+    HARVESTER_BEHAVIOR: {
+        // Nombre maximum de harvesters (backup uniquement)
+        maxHarvesters: 3,
+        
+        // Taille minimale du corps
+        minimalBodySize: 200,
+        
+        // Toujours garder au moins 1 harvester en phase BOOTSTRAP
+        alwaysSpawnOneInBootstrap: true,
+        
+        // Les harvesters déposent dans le storage en dernier recours
+        useStorageAsLastResort: true
+    },
+    
+    // ========== COMPORTEMENT DES BUILDERS ==========
+    
+    BUILDER_BEHAVIOR: {
+        // Réparer quand pas de construction
+        repairWhenNoConstruction: true,
+        
+        // Aider à upgrader quand rien à faire
+        helpUpgradeWhenIdle: true,
+        
+        // HP maximum pour réparer les walls/ramparts
+        maxWallRepairHits: 50000,
+        
+        // Distance max pour chercher un chantier (null = pas de limite)
+        maxConstructionSiteDistance: null
+    },
+    
+    // ========== COMPORTEMENT DES UPGRADERS ==========
+    
+    UPGRADER_BEHAVIOR: {
+        // Énergie minimum pour commencer à upgrader
+        minEnergyToUpgrade: 0,
+        
+        // Distance max du controller pour être efficace
+        maxDistanceFromController: 3,
+        
+        // Upgrader plus agressivement si storage est plein
+        upgradeMoreWhenStorageFull: false,
+        
+        // Seuil de storage "plein" (%)
+        storageFullThreshold: 0.8,
+        
+        // Multiplicateur d'upgraders si storage plein
+        storageFullUpgraderMultiplier: 1.5
     },
     
     // ========== COMPORTEMENT DES TOURS ==========
     
     TOWER_BEHAVIOR: {
-        // Les tours ne réparent que si on a assez de miners (économie d'énergie)
         repairOnlyWithMiners: true,
+        minEnergyPercentToRepair: 0.5,
         
-        // Seuil d'énergie minimum pour qu'une tour répare (%)
-        minEnergyPercentToRepair: 0.5  // 50%
+        // Toujours attaquer en priorité même si peu d'énergie
+        attackEvenWhenLowEnergy: true,
+        
+        // Énergie minimum pour attaquer (0 = toujours)
+        minEnergyToAttack: 0,
+        
+        // Réparer les ramparts/walls avec la tour
+        repairWalls: false,
+        
+        // HP minimum pour qu'une tour répare un rampart/wall
+        minWallHitsToRepair: 10000
     },
     
     // ========== MINERS ==========
     
     MINER_CONFIG: {
-        // Nombre minimum de WORK parts par miner
         minWorkParts: 3,
-        
-        // Nombre maximum de WORK parts par miner
         maxWorkParts: 20,
-        
-        // Distance maximale entre source et container pour créer un miner
         maxContainerRange: 2,
+        useLinksIfAvailable: true,
         
-        // Les miners transfèrent vers un link s'il existe
-        useLinksIfAvailable: true
+        // Remplacer un miner avant qu'il meure
+        spawnReplacementBeforeDeath: true,
+        
+        // Ticks restants pour spawner un remplaçant
+        replacementTicksBeforeDeath: 150
     },
     
     // ========== RÉPARATIONS ==========
     
     REPAIR_CONFIG: {
-        // Seuil HP pour considérer une structure comme "critique" (%)
-        criticalThreshold: 0.25,  // 25%
-        
-        // Seuil HP pour considérer une structure comme "endommagée" (%)
-        damagedThreshold: 0.75,   // 75%
-        
-        // HP maximum pour les walls/ramparts (réparation progressive)
+        criticalThreshold: 0.25,
+        damagedThreshold: 0.75,
         maxWallHits: 50000,
+        buildersAutoRepair: true,
         
-        // Les builders réparent automatiquement s'il n'y a pas de construction
-        buildersAutoRepair: true
+        // Réparer progressivement (augmenter maxWallHits au fil du temps)
+        progressiveWallRepair: false,
+        
+        // Incrément de HP pour les walls à chaque niveau RCL
+        wallHitsPerRCL: 10000
     },
     
     // ========== CONFIGURATION DES CORPS ==========
@@ -134,21 +194,88 @@ module.exports = {
         longDistanceHarvesters: 7
     },
     
-    // ========== ÉNERGIE ET SPAWN ==========
+    // ========== COMPORTEMENT DU SPAWN ==========
     
-    ENERGY_CONFIG: {
-        // Pourcentage minimum d'énergie avant de spawn un creep non-urgent
-        minPercentForSpawn: {
-            BOOTSTRAP: 0.0,      // Toujours spawn en bootstrap
-            CONSTRUCTION: 0.3,   // 30% minimum
-            PRODUCTION: 0.5      // 50% minimum
+    SPAWN_BEHAVIOR: {
+        // Permettre un spawn d'urgence même sans énergie suffisante
+        allowEmergencySpawn: true,
+        
+        // Seuil d'énergie pour spawn d'urgence (creeps critiques uniquement)
+        emergencyEnergyThreshold: 300,
+        
+        // Préférer des gros creeps en PRODUCTION
+        preferLargeCreeps: true,
+        
+        // Nombre max de creeps par spawn
+        maxCreepsPerSpawn: 50,
+        
+        // Afficher les logs de spawn
+        verboseSpawnLogs: true
+    },
+    
+    // ========== GESTION DES LINKS ==========
+    
+    LINK_BEHAVIOR: {
+        // Transférer automatiquement vers le link upgrader
+        autoTransferToUpgrader: true,
+        
+        // Transférer vers le link storage s'il existe
+        autoTransferToStorage: true,
+        
+        // Énergie minimum avant de transférer
+        minEnergyToTransfer: 400,
+        
+        // Index des links sources (miners)
+        sourceLinksIndexes: [2],
+        
+        // Index des links cibles (upgrader, storage)
+        targetLinksIndexes: [0, 1],
+        
+        // Cooldown entre les transferts (ticks)
+        transferCooldown: 0
+    },
+    
+    // ========== DÉFENSE ==========
+    
+    DEFENSIVE_BEHAVIOR: {
+        // Tours attaquent en priorité sur réparations
+        towersAttackFirst: true,
+        
+        // Safe mode automatique
+        safeMode: {
+            autoActivate: false,
+            minHostiles: 3,
+            minHostileDamage: 1000
         },
         
-        // Utiliser energyCapacityAvailable au lieu de energyAvailable en production
-        useMaxEnergyInProduction: true,
+        // Spawner des défenseurs si attaque
+        spawnDefendersOnAttack: false,
         
-        // Énergie minimum dans un container pour qu'un creep y récolte
-        minContainerEnergy: 100
+        // Nombre de défenseurs à spawner
+        defendersPerHostile: 0.5
+    },
+    
+    // ========== ÉCONOMIE ==========
+    
+    ENERGY_CONFIG: {
+        minPercentForSpawn: {
+            BOOTSTRAP: 0.0,
+            CONSTRUCTION: 0.3,
+            PRODUCTION: 0.5
+        },
+        useMaxEnergyInProduction: true,
+        minContainerEnergy: 100,
+        
+        // Réserve d'énergie à ne pas toucher dans le storage
+        reserveEnergy: {
+            BOOTSTRAP: 0,
+            CONSTRUCTION: 500,
+            PRODUCTION: 1000
+        },
+        
+        // Politique de distribution du storage
+        // "balanced" = équilibré, "upgrade" = focus upgrade, "build" = focus construction
+        storageDistributionPolicy: "balanced"
     },
     
     // ========== RAPPORT ==========
@@ -159,34 +286,25 @@ module.exports = {
     
     USE_MANUAL_SPAWN: true,
     
+    // Mode debug (plus de logs)
+    DEBUG_MODE: false,
+    
     // ========== MÉTHODES HELPER ==========
     
-    /**
-     * Récupère les quotas pour une phase donnée
-     */
     getQuotasForPhase: function(phase) {
         return this[phase] || this.PRODUCTION;
     },
     
-    /**
-     * Calcule le nombre de lorries nécessaires
-     */
     calculateLorryCount: function(minerCount) {
         return Math.max(1, Math.ceil(minerCount * 1.0));
     },
     
-    /**
-     * Vérifie si on a assez d'énergie pour spawn selon la phase
-     */
     hasEnoughEnergyToSpawn: function(room, phase) {
         let energyPercent = room.energyAvailable / room.energyCapacityAvailable;
         let threshold = this.ENERGY_CONFIG.minPercentForSpawn[phase] || 0.5;
         return energyPercent >= threshold;
     },
     
-    /**
-     * Vérifie si on a assez de miners pour l'économie avancée
-     */
     hasEnoughMiners: function(room) {
         const MinerManager = require('module.minerManager');
         let minerCount = MinerManager.getMinerCount(room);
@@ -194,9 +312,6 @@ module.exports = {
         return minerCount >= requiredMiners;
     },
     
-    /**
-     * Récupère le link dédié aux upgraders s'il existe
-     */
     getUpgraderLink: function(room) {
         if (!this.CREEP_BEHAVIOR.upgradersUseDedicatedLink) {
             return null;
@@ -215,17 +330,12 @@ module.exports = {
         return null;
     },
     
-    /**
-     * Détermine si un creep doit utiliser les sources directement
-     */
     shouldUseSourcesDirectly: function(creep, room) {
-        // Les harvesters récoltent toujours aux sources
         if (creep.memory.role == 'harvester' && 
             this.CREEP_BEHAVIOR.harvestersAlwaysUseSources) {
             return true;
         }
         
-        // Les workers peuvent récolter aux sources si pas assez de miners
         if (this.CREEP_BEHAVIOR.workersUseSourcesWhenNoMiners && 
             !this.hasEnoughMiners(room)) {
             return true;
@@ -234,17 +344,12 @@ module.exports = {
         return false;
     },
     
-    /**
-     * Vérifie si une tour doit réparer
-     */
     shouldTowerRepair: function(tower) {
-        // Vérifier le seuil d'énergie
         let energyPercent = tower.store[RESOURCE_ENERGY] / tower.store.getCapacity(RESOURCE_ENERGY);
         if (energyPercent < this.TOWER_BEHAVIOR.minEnergyPercentToRepair) {
             return false;
         }
         
-        // Vérifier les miners si configuré
         if (this.TOWER_BEHAVIOR.repairOnlyWithMiners) {
             return this.hasEnoughMiners(tower.room);
         }
@@ -252,9 +357,6 @@ module.exports = {
         return true;
     },
     
-    /**
-     * Obtient les structures cibles pour les lorries
-     */
     getLorryDepositTargets: function() {
         let targets = [
             STRUCTURE_SPAWN,
@@ -268,5 +370,51 @@ module.exports = {
         }
         
         return targets;
+    },
+    
+    /**
+     * Nouvelle méthode : vérifie si une structure a de la place pour l'énergie
+     * Gère à la fois les structures avec .energy et celles avec .store
+     */
+    hasSpaceForEnergy: function(structure) {
+        // Structures classiques (spawn, extension, tower)
+        if (structure.energy !== undefined) {
+            return structure.energy < structure.energyCapacity;
+        }
+        
+        // Structures avec store (storage, container, link)
+        if (structure.store) {
+            return structure.store.getFreeCapacity(RESOURCE_ENERGY) > 0;
+        }
+        
+        return false;
+    },
+    
+    /**
+     * Nouvelle méthode : calcule le pourcentage de remplissage d'énergie
+     */
+    getEnergyPercent: function(structure) {
+        if (structure.energy !== undefined) {
+            return structure.energy / structure.energyCapacity;
+        }
+        
+        if (structure.store) {
+            let capacity = structure.store.getCapacity(RESOURCE_ENERGY);
+            if (capacity > 0) {
+                return structure.store[RESOURCE_ENERGY] / capacity;
+            }
+        }
+        
+        return 0;
+    },
+    
+    /**
+     * Nouvelle méthode : détermine si le storage est "plein"
+     */
+    isStorageFull: function(room) {
+        if (!room.storage) return false;
+        
+        let percent = this.getEnergyPercent(room.storage);
+        return percent >= this.UPGRADER_BEHAVIOR.storageFullThreshold;
     }
 };
