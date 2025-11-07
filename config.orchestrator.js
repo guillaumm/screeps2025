@@ -27,7 +27,7 @@ module.exports = {
         upgraders: 2,
         miners: 'auto',
         lorries: 'auto',
-        repairers: 0,
+        repairers: 2,
         longDistanceHarvesters: 0
     },
     
@@ -37,8 +37,8 @@ module.exports = {
         upgraders: 4,
         miners: 'auto',
         lorries: 'auto',
-        repairers: 1,
-        longDistanceHarvesters: 2
+        repairers: 2,
+        longDistanceHarvesters: 0
     },
     
     // ========== COMPORTEMENT DES CREEPS ==========

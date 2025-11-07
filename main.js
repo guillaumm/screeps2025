@@ -48,7 +48,7 @@ module.exports.loop = function() {
         for (let i in storages) {
             tick_niveaux += " " + storages[i].structureType + i + " " + storages[i].store.energy;
         }
-        console.log("tick_niveaux " + tick_niveaux);
+        //console.log("tick_niveaux " + tick_niveaux);
         Memory.niveaux[0] += tick_niveaux;
     }
     
