@@ -1,7 +1,8 @@
-// role.builder - Version refactorée avec configuration centralisée
+// role.builder - Version refactorisée avec priorisation des containers sources
 
 var roleUpgrader = require('role.upgrader');
 const RepairManager = require('module.repairManager');
+const ConstructionManager = require('module.constructionManager');
 const CONFIG = require('config.orchestrator');
 
 module.exports = {
@@ -18,6 +19,7 @@ module.exports = {
         // Gestion des états working/not working
         if (creep.memory.working == true && creep.carry.energy == 0) {
             creep.memory.working = false;
+            creep.memory.constructionTarget = null;
             creep.memory.repairTarget = null;
         }
         else if (creep.memory.working == false && creep.carry.energy == creep.carryCapacity) {
@@ -27,13 +29,31 @@ module.exports = {
         // Si le creep doit travailler
         if (creep.memory.working == true) {
             
-            // 1. PRIORITÉ : Chercher un site de construction
-            let constructionSite = creep.pos.findClosestByPath(FIND_CONSTRUCTION_SITES);
+            // 1. PRIORITÉ ABSOLUE : Construire les sites prioritaires (containers sources)
+            let constructionTarget = null;
             
-            if (constructionSite != undefined) {
+            // Vérifier/récupérer la cible de construction en mémoire
+            if (creep.memory.constructionTarget) {
+                constructionTarget = Game.getObjectById(creep.memory.constructionTarget);
+                // Vérifier si toujours valide
+                if (!constructionTarget || constructionTarget.progress >= constructionTarget.progressTotal) {
+                    constructionTarget = null;
+                    creep.memory.constructionTarget = null;
+                }
+            }
+            
+            // Si pas de cible valide, en trouver une nouvelle avec priorisation
+            if (!constructionTarget) {
+                constructionTarget = ConstructionManager.findPriorityConstructionSite(creep.room, creep);
+                if (constructionTarget) {
+                    creep.memory.constructionTarget = constructionTarget.id;
+                }
+            }
+            
+            if (constructionTarget) {
                 // Construire
-                if (creep.build(constructionSite) == ERR_NOT_IN_RANGE) {
-                    creep.moveTo(constructionSite);
+                if (creep.build(constructionTarget) == ERR_NOT_IN_RANGE) {
+                    creep.moveTo(constructionTarget);
                 }
             } 
             // 2. Pas de construction : vérifier si les builders doivent réparer

@@ -255,6 +255,25 @@ module.exports = {
         defendersPerHostile: 0.5
     },
     
+    // ========== CONFIGURATION DES CONSTRUCTIONS ==========
+    
+    CONSTRUCTION_CONFIG: {
+        // Distance max pour qu'un container soit considéré comme "container source"
+        sourceContainerMaxRange: 2,
+        
+        // Nombre minimum de builders quand des containers sources sont en construction
+        minBuildersForSourceContainers: 2,
+        
+        // Les builders priorisent toujours les containers sources
+        buildersPrioritizeSourceContainers: true,
+        
+        // Multiplier le nombre de builders si containers sources manquent
+        boostBuildersForSourceContainers: true,
+        
+        // Pause sur les autres constructions tant que containers sources pas finis
+        pauseOtherConstructionsDuringSourceContainers: false
+    },
+    
     // ========== ÉCONOMIE ==========
     
     ENERGY_CONFIG: {

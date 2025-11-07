@@ -142,10 +142,10 @@ module.exports = {
     },
     
     /**
-     * Rapport sur l'infrastructure
+        * Rapport sur l'infrastructure - VERSION MISE À JOUR
      */
     reportInfrastructure: function(room) {
-        console.log('\n🏗️  INFRASTRUCTURE');
+        console.log('\n🗺️ INFRASTRUCTURE');
         console.log('-'.repeat(40));
         
         // Phase actuelle
@@ -170,20 +170,9 @@ module.exports = {
         });
         console.log(`  Containers:              ${containers.length} / ${sources.length}`);
         
-        // Sites de construction
-        let constructionSites = room.find(FIND_CONSTRUCTION_SITES);
-        console.log(`  Sites construction:      ${constructionSites.length}`);
-        
-        if (constructionSites.length > 0) {
-            let totalProgress = 0;
-            let totalProgressMax = 0;
-            for (let site of constructionSites) {
-                totalProgress += site.progress;
-                totalProgressMax += site.progressTotal;
-            }
-            let progressPercent = (totalProgress / totalProgressMax * 100).toFixed(1);
-            console.log(`  Progression:             ${progressPercent}%`);
-        }
+        // 🔧 AJOUT : Rapport sur les constructions avec priorisation
+        const ConstructionManager = require('module.constructionManager');
+        console.log(ConstructionManager.generateConstructionReport(room));
         
         // Extensions
         let extensions = room.find(FIND_MY_STRUCTURES, {
@@ -207,7 +196,9 @@ module.exports = {
         const RepairManager = require('module.repairManager');
         console.log(RepairManager.generateRepairReport(room));
     },
-    
+
+
+   
     /**
      * Rapport sur le controller
      */

@@ -95,12 +95,17 @@ module.exports.loop = function() {
 
 // ========== FONCTION DE SPAWN ORCHESTRÉE ==========
 
+// ========== FONCTION DE SPAWN ORCHESTRÉE - VERSION AMÉLIORÉE ==========
+
 function spawnWithOrchestrator(spawn) {
     
     // Ne pas essayer de spawn si le spawn est occupé
     if (spawn.spawning) {
         return;
     }
+    
+    // Import du ConstructionManager
+    const ConstructionManager = require('module.constructionManager');
     
     // Comptage des creeps par rôle
     let creepCounts = {
@@ -128,11 +133,26 @@ function spawnWithOrchestrator(spawn) {
     // Récupérer les quotas configurés pour cette phase
     let quotas = CONFIG.getQuotasForPhase(phase);
     
+    // 🔧 AJUSTEMENT DYNAMIQUE : Booster les builders si containers sources manquent
+    let missingSourceContainers = ConstructionManager.countMissingSourceContainers(spawn.room);
+    if (missingSourceContainers > 0 && CONFIG.CONSTRUCTION_CONFIG.boostBuildersForSourceContainers) {
+        quotas.builders = Math.max(
+            quotas.builders, 
+            CONFIG.CONSTRUCTION_CONFIG.minBuildersForSourceContainers
+        );
+        
+        // Log du boost
+        if (Game.time % 20 == 0) {
+            console.log(`[CONSTRUCTION BOOST] ${missingSourceContainers} containers sources manquants -> ${quotas.builders} builders requis`);
+        }
+    }
+    
     // Log de la phase (debug)
     if (Game.time % 100 == 0) {
         console.log("=== Phase actuelle: " + phase + " ===");
         console.log("Miners: " + creepCounts.miners + "/" + MinerManager.getRequiredMinerCount(spawn.room));
         console.log("Containers: " + containers.length);
+        console.log("Containers sources manquants: " + missingSourceContainers);
         console.log("Sites de construction: " + constructionSites.length);
     }
     
@@ -164,6 +184,16 @@ function spawnWithOrchestrator(spawn) {
         spawnNeeds.push({ role: 'harvester', priority: CONFIG.SPAWN_PRIORITY.harvesters });
     }
     
+    // 🔧 BOOST : Si containers sources manquent, les builders deviennent TRÈS prioritaires
+    let builderPriority = CONFIG.SPAWN_PRIORITY.builders;
+    if (missingSourceContainers > 0) {
+        builderPriority = 0.5; // Plus prioritaire que les harvesters !
+    }
+    
+    if (creepCounts.builders < quotas.builders) {
+        spawnNeeds.push({ role: 'builder', priority: builderPriority });
+    }
+    
     // Miners : vérifier qu'on peut les créer (containers présents)
     if (creepCounts.miners < minerQuota && MinerManager.canSpawnMiners(spawn.room)) {
         spawnNeeds.push({ role: 'miner', priority: CONFIG.SPAWN_PRIORITY.miners });
@@ -178,9 +208,6 @@ function spawnWithOrchestrator(spawn) {
     if (creepCounts.upgraders < quotas.upgraders) {
         spawnNeeds.push({ role: 'upgrader', priority: CONFIG.SPAWN_PRIORITY.upgraders });
     }
-    if (creepCounts.builders < quotas.builders) {
-        spawnNeeds.push({ role: 'builder', priority: CONFIG.SPAWN_PRIORITY.builders });
-    }
     if (creepCounts.repairers < quotas.repairers) {
         spawnNeeds.push({ role: 'repairer', priority: CONFIG.SPAWN_PRIORITY.repairers });
     }
@@ -193,7 +220,7 @@ function spawnWithOrchestrator(spawn) {
     
     // Debug : afficher les besoins
     if (spawnNeeds.length > 0 && Game.time % 10 == 0) {
-        console.log('[ORCHESTRATOR] Besoins détectés : ' + spawnNeeds.map(n => n.role).join(', '));
+        console.log('[ORCHESTRATOR] Besoins détectés : ' + spawnNeeds.map(n => n.role + '(' + n.priority + ')').join(', '));
     }
     
     // Spawn le creep le plus prioritaire
@@ -202,6 +229,8 @@ function spawnWithOrchestrator(spawn) {
         spawnCreepByRole(spawn, need.role, phase);
     }
 }
+
+
 
 // ========== FONCTIONS DE DÉTECTION DE PHASE ==========
 
