@@ -19,11 +19,24 @@ module.exports.loop = function() {
     
     // Récupérer le spawn principal
     let mainSpawn = Game.spawns[Object.keys(Game.spawns)[0]];
+        // ========== PLACEMENT AUTOMATIQUE DES CONTAINERS SOURCES ==========
+    if (CONFIG.CONSTRUCTION_CONFIG.autoPlaceSourceContainers) {
+        if (Game.time % CONFIG.CONSTRUCTION_CONFIG.autoPlaceInterval === 0) {
+            let placed = AutoContainerPlacer.placeAllMissingContainers(mainSpawn.room);
+            if (placed > 0) {
+                console.log(`[AUTO-PLACER] 🏗️ ${placed} container(s) source(s) placé(s) !`);
+            }
+        }
+    }
     
     // ========== RAPPORT PÉRIODIQUE ==========
     if (Game.time % CONFIG.REPORT_INTERVAL == 0) {
         Reporter.generateReport(mainSpawn);
+        // Ajouter le rapport des containers
+        console.log(AutoContainerPlacer.generateContainerReport(mainSpawn.room));
     }
+
+
     
     // Gestion du CPU bucket
     if(Game.cpu.bucket > 9000) {

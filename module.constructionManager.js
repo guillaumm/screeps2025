@@ -7,7 +7,7 @@ const CONFIG = require('config.orchestrator');
 
 // Configuration spécifique à ce module (à ajouter dans config.orchestrator.js)
 // CONSTRUCTION_CONFIG: {
-//     sourceContainerMaxRange: 2,
+//     sourceContainerMaxRange: 1,  // CRITIQUE: Miner se place sur le container, distance = 1 !
 //     minBuildersForSourceContainers: 2,
 //     buildersPrioritizeSourceContainers: true
 // }
