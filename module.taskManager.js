@@ -1,6 +1,6 @@
 /*
 Task Manager - Architecture task-based pour creeps polyvalents
-Remplace les 7 fichiers de rôles par un système de priorités dynamiques
+Version améliorée avec say() et configuration centralisée
 */
 
 const CONFIG = require('config.orchestrator');
@@ -15,6 +15,17 @@ const TASKS = {
     UPGRADE: 'upgrade',
     TRANSFER: 'transfer',
     PICKUP: 'pickup'
+};
+
+// Emojis pour le say()
+const TASK_EMOJIS = {
+    harvest: '⛏️',
+    build: '🔨',
+    repair: '🔧',
+    upgrade: '⚡',
+    transfer: '📦',
+    pickup: '💰',
+    idle: '😴'
 };
 
 module.exports = {
@@ -35,8 +46,33 @@ module.exports = {
             this.assignBestTask(creep);
         }
         
+        // 🔧 AFFICHER LA TÂCHE via say() toutes les 3 ticks
+        if (Game.time % 3 === 0) {
+            this.displayTask(creep);
+        }
+        
         // Exécuter la task actuelle
         this.executeTask(creep);
+    },
+    
+    /**
+     * 🔧 NOUVEAU : Affiche la tâche en cours avec say()
+     */
+    displayTask: function(creep) {
+        let task = creep.memory.currentTask;
+        let energy = creep.store[RESOURCE_ENERGY];
+        let capacity = creep.store.getCapacity(RESOURCE_ENERGY);
+        let percent = capacity > 0 ? Math.floor((energy / capacity) * 100) : 0;
+        
+        if (!task) {
+            creep.say('😴 Idle');
+            return;
+        }
+        
+        let emoji = TASK_EMOJIS[task] || '❓';
+        let display = `${emoji} ${percent}%`;
+        
+        creep.say(display);
     },
     
     /**
@@ -48,6 +84,15 @@ module.exports = {
         // Si vide d'énergie → récolter
         if (creep.store[RESOURCE_ENERGY] === 0) {
             return this.assignHarvestTask(creep);
+        }
+        
+        // 🔧 FORCER L'UPGRADE si le creep a été spawné en tant qu'upgrader
+        if (creep.memory.spawnReason === 'UPGRADER') {
+            // Toujours upgrader, sauf si vraiment besoin critique de build/repair
+            let criticalNeeds = this.hasCriticalNeeds(room);
+            if (!criticalNeeds) {
+                return this.assignUpgradeTask(creep);
+            }
         }
         
         // Sinon, calculer les priorités selon l'état de la room
@@ -80,6 +125,25 @@ module.exports = {
     },
     
     /**
+     * 🔧 NOUVEAU : Vérifie s'il y a des besoins critiques
+     */
+    hasCriticalNeeds: function(room) {
+        // Containers sources en construction
+        let missingContainers = ConstructionManager.countMissingSourceContainers(room);
+        if (missingContainers > 0) return true;
+        
+        // Structures critiques à réparer
+        let criticalRepairs = RepairManager.getRepairStats(room).critical;
+        if (criticalRepairs > 0) return true;
+        
+        // Spawn/extensions vides
+        let energyPercent = room.energyAvailable / room.energyCapacityAvailable;
+        if (energyPercent < CONFIG.TASK_CONFIG.criticalEnergyThreshold) return true;
+        
+        return false;
+    },
+    
+    /**
      * Calcule les priorités dynamiques selon l'état de la room
      */
     calculateTaskPriorities: function(room) {
@@ -91,15 +155,15 @@ module.exports = {
             priorities.push(TASKS.BUILD);
         }
         
-        // 2. Structures critiques à réparer (< 25% HP)
+        // 2. Structures critiques à réparer (< seuil configuré)
         let criticalRepairs = RepairManager.getRepairStats(room).critical;
         if (criticalRepairs > 0) {
             priorities.push(TASKS.REPAIR);
         }
         
-        // 3. Transfer si spawn/extensions vides
+        // 3. Transfer si spawn/extensions vides (selon config)
         let energyPercent = room.energyAvailable / room.energyCapacityAvailable;
-        if (energyPercent < 0.8) {
+        if (energyPercent < CONFIG.TASK_CONFIG.transferPriorityThreshold) {
             priorities.push(TASKS.TRANSFER);
         }
         
@@ -117,7 +181,7 @@ module.exports = {
             }
         }
         
-        // 6. Upgrade par défaut
+        // 6. 🔧 UPGRADE toujours présent (garantit qu'on n'oublie jamais)
         priorities.push(TASKS.UPGRADE);
         
         return priorities;
@@ -230,7 +294,7 @@ module.exports = {
         }
         
         if (creep.build(target) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(target, {reusePath: 15});
+            creep.moveTo(target, {reusePath: 15, visualizePathStyle: {stroke: '#ffaa00'}});
         }
     },
     
@@ -245,7 +309,7 @@ module.exports = {
         }
         
         if (creep.repair(target) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(target, {reusePath: 15});
+            creep.moveTo(target, {reusePath: 15, visualizePathStyle: {stroke: '#00ff00'}});
         }
     },
     
@@ -255,7 +319,7 @@ module.exports = {
     doUpgrade: function(creep) {
         let controller = creep.room.controller;
         if (creep.upgradeController(controller) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(controller, {reusePath: 15});
+            creep.moveTo(controller, {reusePath: 15, visualizePathStyle: {stroke: '#ffffff'}});
         }
     },
     
@@ -270,7 +334,7 @@ module.exports = {
         }
         
         if (creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(target, {reusePath: 15});
+            creep.moveTo(target, {reusePath: 15, visualizePathStyle: {stroke: '#0000ff'}});
         }
     },
     

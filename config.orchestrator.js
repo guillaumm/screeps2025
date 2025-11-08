@@ -1,6 +1,6 @@
 /*
-Configuration centralisée de l'orchestrateur v2
-Toutes les manettes pour une gestion intelligente future
+Configuration centralisée de l'orchestrateur v3
+Ajout de la configuration des tasks
 */
 
 module.exports = {
@@ -14,7 +14,7 @@ module.exports = {
     BOOTSTRAP: {
         harvesters: 2,
         builders: 2,
-        upgraders: 2,
+        upgraders: 2,  // Au moins 2 upgraders en bootstrap
         miners: 'auto',
         lorries: 0,
         repairers: 0,
@@ -24,7 +24,7 @@ module.exports = {
     CONSTRUCTION: {
         harvesters: 1,
         builders: 2,
-        upgraders: 2,
+        upgraders: 3,  // 3 upgraders en construction
         miners: 'auto',
         lorries: 'auto',
         repairers: 2,
@@ -34,11 +34,33 @@ module.exports = {
     PRODUCTION: {
         harvesters: 0,
         builders: 1,
-        upgraders: 4,
+        upgraders: 4,  // 4 upgraders en production
         miners: 'auto',
         lorries: 'auto',
         repairers: 2,
         longDistanceHarvesters: 0
+    },
+    
+    // ========== CONFIGURATION DES TASKS ==========
+    
+    TASK_CONFIG: {
+        // Seuil d'énergie critique (spawn/ext vides)
+        criticalEnergyThreshold: 0.3,
+        
+        // Seuil pour prioriser le transfer
+        transferPriorityThreshold: 0.8,
+        
+        // Forcer au moins N creeps à upgrade en permanence
+        minUpgradersAlways: 1,
+        
+        // Permettre aux upgraders de faire autre chose si critique
+        upgradersCanDoOtherTasks: true,
+        
+        // Afficher les tâches via say()
+        displayTasksWithSay: true,
+        
+        // Fréquence d'affichage (ticks)
+        sayFrequency: 3
     },
     
     // ========== COMPORTEMENT DES CREEPS ==========
@@ -255,8 +277,7 @@ module.exports = {
         defendersPerHostile: 0.5
     },
     
-
-        // ========== CONFIGURATION DES CONSTRUCTIONS ==========
+    // ========== CONFIGURATION DES CONSTRUCTIONS ==========
     
     CONSTRUCTION_CONFIG: {
         // Distance max pour qu'un container soit considéré comme "container source"
@@ -398,8 +419,7 @@ module.exports = {
     },
     
     /**
-     * Nouvelle méthode : vérifie si une structure a de la place pour l'énergie
-     * Gère à la fois les structures avec .energy et celles avec .store
+     * Vérifie si une structure a de la place pour l'énergie
      */
     hasSpaceForEnergy: function(structure) {
         // Structures classiques (spawn, extension, tower)
@@ -416,7 +436,7 @@ module.exports = {
     },
     
     /**
-     * Nouvelle méthode : calcule le pourcentage de remplissage d'énergie
+     * Calcule le pourcentage de remplissage d'énergie
      */
     getEnergyPercent: function(structure) {
         if (structure.energy !== undefined) {
@@ -434,7 +454,7 @@ module.exports = {
     },
     
     /**
-     * Nouvelle méthode : détermine si le storage est "plein"
+     * Détermine si le storage est "plein"
      */
     isStorageFull: function(room) {
         if (!room.storage) return false;

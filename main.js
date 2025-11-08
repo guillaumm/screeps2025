@@ -1,6 +1,8 @@
 /*
 Main refactorisé : Workers polyvalents + Miners/Lorries spécialisés
-Gère correctement le bootstrap avec 300 energy
+- Workers affichent leur tâche via say()
+- Test d'énergie avant spawn
+- Toujours au moins 1 upgrader
 */
 
 const CONFIG = require('config.orchestrator');
@@ -8,7 +10,7 @@ const MinerManager = require('module.minerManager');
 const AutoContainerPlacer = require('module.autoContainerPlacer');
 const Reporter = require('module.reporter');
 
-// Charger les prototypes (pas de parenthèses, ce ne sont pas des fonctions)
+// Charger les prototypes
 require('prototype.spawn');
 require('prototype.tower');
 require('prototype.creep');
@@ -69,11 +71,23 @@ function spawnWithOrchestrator(spawn) {
     
     let room = spawn.room;
     
+    // 🔧 TEST D'ÉNERGIE AVANT TOUT
+    let availableEnergy = room.energyAvailable;
+    if (availableEnergy < 200) {
+        // Pas assez d'énergie pour spawner quoi que ce soit
+        return;
+    }
+    
     // Compter les creeps par type
-    let workers = _.filter(Game.creeps, c => 
+    let allWorkers = _.filter(Game.creeps, c => 
         c.room.name === room.name && 
         !['miner', 'lorry', 'longDistanceHarvester'].includes(c.memory.role)
-    ).length;
+    );
+    
+    let workers = allWorkers.length;
+    
+    // 🔧 COMPTER LES UPGRADERS ACTUELS
+    let upgraders = _.filter(allWorkers, c => c.memory.currentTask === 'upgrade').length;
     
     let miners = MinerManager.getMinerCount(room);
     let lorries = _.filter(Game.creeps, c => c.memory.role === 'lorry' && c.room.name === room.name).length;
@@ -89,6 +103,9 @@ function spawnWithOrchestrator(spawn) {
                       (quotas.upgraders || 0) + 
                       (quotas.repairers || 0);
     
+    // 🔧 QUOTA MINIMUM D'UPGRADERS
+    let minUpgraders = Math.max(1, quotas.upgraders || 1);
+    
     let minerQuota = quotas.miners === 'auto' 
         ? MinerManager.getRequiredMinerCount(room)
         : quotas.miners;
@@ -100,29 +117,34 @@ function spawnWithOrchestrator(spawn) {
     // Priorités de spawn
     let spawnNeeds = [];
     
-    // 🔧 BOOTSTRAP CRITIQUE : Si aucun creep, TOUJOURS spawner un worker
+    // 🚨 BOOTSTRAP CRITIQUE : Si aucun creep vivant
     if (workers === 0 && miners === 0 && lorries === 0) {
         console.log('⚠️ BOOTSTRAP CRITIQUE : Aucun creep vivant !');
-        spawnNeeds.push({ type: 'worker', priority: 0, emergency: true });
+        spawnNeeds.push({ type: 'worker', priority: 0, emergency: true, reason: 'EMERGENCY' });
+    }
+    // 🔧 PRIORITÉ : Au moins 1 upgrader pour ne jamais downgrade
+    else if (upgraders < minUpgraders) {
+        console.log(`⚡ Besoin d'upgrader : ${upgraders}/${minUpgraders}`);
+        spawnNeeds.push({ type: 'worker', priority: 1, reason: 'UPGRADER' });
     }
     // Workers polyvalents
     else if (workers < workerQuota) {
-        spawnNeeds.push({ type: 'worker', priority: phase === 'BOOTSTRAP' ? 1 : 3 });
+        spawnNeeds.push({ type: 'worker', priority: phase === 'BOOTSTRAP' ? 2 : 3, reason: 'WORKER' });
     }
     
     // Miners (seulement si containers disponibles)
     if (miners < minerQuota && MinerManager.canSpawnMiners(room)) {
-        spawnNeeds.push({ type: 'miner', priority: 2 });
+        spawnNeeds.push({ type: 'miner', priority: 2, reason: 'MINER' });
     }
     
     // Lorries (seulement si miners présents)
     if (lorries < lorryQuota && miners > 0) {
-        spawnNeeds.push({ type: 'lorry', priority: 4 });
+        spawnNeeds.push({ type: 'lorry', priority: 4, reason: 'LORRY' });
     }
     
     // LDH
     if (ldh < quotas.longDistanceHarvesters) {
-        spawnNeeds.push({ type: 'ldh', priority: 5 });
+        spawnNeeds.push({ type: 'ldh', priority: 5, reason: 'LDH' });
     }
     
     if (spawnNeeds.length === 0) return;
@@ -131,14 +153,14 @@ function spawnWithOrchestrator(spawn) {
     spawnNeeds.sort((a, b) => a.priority - b.priority);
     let need = spawnNeeds[0];
     
-    spawnCreep(spawn, need.type, phase, need.emergency || false);
+    spawnCreep(spawn, need.type, phase, need.emergency || false, need.reason);
 }
 
 /**
  * Spawne un creep du type demandé
  */
-function spawnCreep(spawn, type, phase, emergency = false) {
-    // En mode emergency (bootstrap critique), utiliser l'énergie disponible
+function spawnCreep(spawn, type, phase, emergency = false, reason = '') {
+    // Déterminer l'énergie à utiliser
     let energy;
     if (emergency) {
         energy = spawn.room.energyAvailable;
@@ -147,6 +169,15 @@ function spawnCreep(spawn, type, phase, emergency = false) {
         energy = spawn.room.energyCapacityAvailable;
     } else {
         energy = spawn.room.energyAvailable;
+    }
+    
+    // 🔧 VÉRIFIER QU'ON A ASSEZ D'ÉNERGIE
+    let requiredEnergy = getMinimumEnergy(type);
+    if (energy < requiredEnergy) {
+        if (Game.time % 50 === 0) {
+            console.log(`⏳ Pas assez d'énergie pour ${type}: ${energy}/${requiredEnergy}`);
+        }
+        return;
     }
     
     let name = type.charAt(0).toUpperCase() + type.slice(1) + '_' + Game.time;
@@ -158,7 +189,8 @@ function spawnCreep(spawn, type, phase, emergency = false) {
             memory = { 
                 role: 'worker',
                 currentTask: null,
-                taskTarget: null
+                taskTarget: null,
+                spawnReason: reason // Pour savoir pourquoi il a été créé
             };
             break;
             
@@ -194,9 +226,23 @@ function spawnCreep(spawn, type, phase, emergency = false) {
     
     if (result === OK) {
         let prefix = emergency ? '🚨' : '✅';
-        console.log(`${prefix} [${phase}] Spawning ${type}: ${name} (${body.length} parts, ${calculateCost(body)} energy)`);
+        let cost = calculateCost(body);
+        console.log(`${prefix} [${phase}] Spawning ${type} (${reason}): ${name} (${body.length} parts, ${cost}/${energy} energy)`);
     } else if (result !== OK) {
-        console.log(`❌ Failed to spawn ${type}: ${result}`);
+        console.log(`❌ Failed to spawn ${type}: ${result} (need ${requiredEnergy}, have ${energy})`);
+    }
+}
+
+/**
+ * Retourne l'énergie minimum pour spawner un type de creep
+ */
+function getMinimumEnergy(type) {
+    switch(type) {
+        case 'worker': return 200; // [WORK, CARRY, MOVE]
+        case 'miner': return 350;  // [WORK x3, CARRY, MOVE, MOVE]
+        case 'lorry': return 100;  // [CARRY, MOVE]
+        case 'ldh': return 550;    // Corps fixe
+        default: return 200;
     }
 }
 
@@ -209,11 +255,13 @@ function getAdaptiveBody(energy, type, phase) {
     if (type === 'worker') {
         // Corps minimal : 200 energy = [WORK, CARRY, MOVE]
         if (energy < 200) {
-            // Bootstrap critique : 300 energy minimum
-            if (energy >= 300) {
-                return [WORK, CARRY, MOVE, WORK, CARRY, MOVE];
-            }
-            return [WORK, CARRY, MOVE];
+            console.log(`⚠️ Énergie insuffisante pour worker: ${energy}/200`);
+            return null;
+        }
+        
+        // Bootstrap critique : 300 energy = double minimal
+        if (energy >= 300 && energy < 400) {
+            return [WORK, CARRY, MOVE, WORK, CARRY, MOVE];
         }
         
         // Calculer combien d'unités [WORK, CARRY, MOVE] on peut faire
@@ -230,8 +278,13 @@ function getAdaptiveBody(energy, type, phase) {
     
     if (type === 'lorry') {
         // Corps minimal : 150 energy = [CARRY, CARRY, MOVE]
+        if (energy < 100) {
+            console.log(`⚠️ Énergie insuffisante pour lorry: ${energy}/100`);
+            return null;
+        }
+        
         if (energy < 150) {
-            return [CARRY, MOVE];
+            return [CARRY, MOVE]; // 100 energy
         }
         
         let units = Math.floor(energy / 150);
