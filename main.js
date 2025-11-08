@@ -1,278 +1,134 @@
 /*
-Version refactorisée avec système de phases de démarrage
-+ Orchestrateur configurable avec seuils d'énergie par phase
-+ Système de rapport automatique
-+ Gestion centralisée des miners
-+ Placement automatique des containers sources
+Spawn simplifié : 
+- 1 seul type de worker polyvalent (remplace harvester/builder/upgrader/repairer)
+- Miners et Lorries restent spécialisés
 */
 
-// Import modules
-require('prototype.creep');
-require('prototype.tower');
-require('prototype.spawn');
-
-// Import nouveaux modules
-const CONFIG = require('config.orchestrator');
-const Reporter = require('module.reporter');
-const MinerManager = require('module.minerManager');
-const ConstructionManager = require('module.constructionManager');
-const AutoContainerPlacer = require('module.autoContainerPlacer');
-
-module.exports.loop = function() {
-    
-    // Récupérer le spawn principal
-    let mainSpawn = Game.spawns[Object.keys(Game.spawns)[0]];
-    
-    // ========== PLACEMENT AUTOMATIQUE DES CONTAINERS SOURCES ==========
-    if (CONFIG.CONSTRUCTION_CONFIG && CONFIG.CONSTRUCTION_CONFIG.autoPlaceSourceContainers) {
-        if (Game.time % CONFIG.CONSTRUCTION_CONFIG.autoPlaceInterval === 0) {
-            let placed = AutoContainerPlacer.placeAllMissingContainers(mainSpawn.room);
-            if (placed > 0) {
-                console.log(`[AUTO-PLACER] 🏗️ ${placed} container(s) placé(s)`);
-            }
-        }
-    }
-    
-    // ========== RAPPORT PÉRIODIQUE ==========
-    if (Game.time % CONFIG.REPORT_INTERVAL == 0) {
-        Reporter.generateReport(mainSpawn);
-    }
-    
-    // Gestion du CPU bucket
-    if(Game.cpu.bucket > 9000) {
-        Game.cpu.generatePixel();
-    }
-    
-    // Initialisation mémoire
-    if(!Memory.niveaux) {
-        Memory.niveaux = [""];
-    }
-    
-    // Log périodique des niveaux d'énergie
-    if (Game.time % 20 == 0) {
-        const storages = mainSpawn.room.find(FIND_STRUCTURES, {
-            filter: s => (
-                s.structureType == STRUCTURE_CONTAINER ||
-                s.structureType == STRUCTURE_LINK ||
-                s.structureType == STRUCTURE_STORAGE
-            )
-        });
-        let tick_niveaux = ";" + String(Game.time) + " " + mainSpawn.room.controller.progress + " ";
-        for (let i in storages) {
-            tick_niveaux += " " + storages[i].structureType + i + " " + storages[i].store.energy;
-        }
-        //console.log("tick_niveaux " + tick_niveaux);
-        Memory.niveaux[0] += tick_niveaux;
-    }
-    
-    // Nettoyage mémoire des creeps morts
-    for (let name in Memory.creeps) {
-        if (Game.creeps[name] == undefined) {
-            delete Memory.creeps[name];
-        }
-    }
-    
-    // Exécution de tous les creeps
-    for (let name in Game.creeps) {
-        Game.creeps[name].runRole();
-    }
-
-    // Exécution des tours
-    var towers = _.filter(Game.structures, s => s.structureType == STRUCTURE_TOWER);
-    for (let tower of towers) {
-        tower.defend();
-    }
-    
-    // Gestion des links
-    let linkList = _.filter(Game.structures, s => s.structureType == STRUCTURE_LINK);
-    if (linkList.length >= 3) {
-        let linkTo = linkList[0];
-        if (linkList[1].store.getFreeCapacity(RESOURCE_ENERGY) > linkList[0].store.getFreeCapacity(RESOURCE_ENERGY)) {
-            linkTo = linkList[1];
-        }
-        linkList[2].transferEnergy(linkTo);
-    }
-
-    // ========== SYSTÈME DE SPAWN ==========
-    
-    if (CONFIG.USE_MANUAL_SPAWN) {
-        // Mode manuel : spawn via main.js avec orchestrateur
-        spawnWithOrchestrator(mainSpawn);
-    } else {
-        // Mode automatique : spawn via prototype.spawn
-        for (let spawnName in Game.spawns) {
-            Game.spawns[spawnName].spawnCreepsIfNecessary();
-        }
-    }
-};
-
-// ========== FONCTION DE SPAWN ORCHESTRÉE ==========
-
 function spawnWithOrchestrator(spawn) {
+    if (spawn.spawning) return;
     
-    // Ne pas essayer de spawn si le spawn est occupé
-    if (spawn.spawning) {
-        return;
-    }
+    let room = spawn.room;
     
-    // Comptage des creeps par rôle
-    let creepCounts = {
-        harvesters: _.filter(Game.creeps, c => c.memory.role == 'harvester').length,
-        upgraders: _.filter(Game.creeps, c => c.memory.role == 'upgrader').length,
-        builders: _.filter(Game.creeps, c => c.memory.role == 'builder').length,
-        repairers: _.filter(Game.creeps, c => c.memory.role == 'repairer').length,
-        miners: MinerManager.getMinerCount(spawn.room),
-        lorries: _.filter(Game.creeps, c => c.memory.role == 'lorry').length,
-        longDistanceHarvesters: _.sum(Game.creeps, c => 
-            c.memory.role == 'longDistanceHarvester' && c.memory.target == CONFIG.TARGET_ROOM
-        )
-    };
+    // Compter les creeps
+    let workers = _.filter(Game.creeps, c => 
+        c.room.name === room.name && 
+        !['miner', 'lorry', 'longDistanceHarvester'].includes(c.memory.role)
+    ).length;
     
-    // Détection de l'état de la base
-    let nbSources = spawn.room.find(FIND_SOURCES).length;
-    let containers = spawn.room.find(FIND_STRUCTURES, {
-        filter: s => s.structureType == STRUCTURE_CONTAINER
-    });
-    let constructionSites = spawn.room.find(FIND_CONSTRUCTION_SITES);
+    let miners = MinerManager.getMinerCount(room);
+    let lorries = _.filter(Game.creeps, c => c.memory.role === 'lorry').length;
+    let ldh = _.filter(Game.creeps, c => c.memory.role === 'longDistanceHarvester').length;
     
-    // Déterminer la phase actuelle
-    let phase = getPhase(creepCounts.miners, nbSources, containers.length, constructionSites.length);
-    
-    // Récupérer les quotas configurés pour cette phase
+    // Déterminer la phase
+    let phase = getPhase(miners, room);
     let quotas = CONFIG.getQuotasForPhase(phase);
     
-    // 🔧 AJUSTEMENT DYNAMIQUE : Booster les builders si containers sources manquent
-    let missingSourceContainers = 0;
-    if (ConstructionManager && ConstructionManager.countMissingSourceContainers) {
-        missingSourceContainers = ConstructionManager.countMissingSourceContainers(spawn.room);
-        
-        if (missingSourceContainers > 0 && CONFIG.CONSTRUCTION_CONFIG && CONFIG.CONSTRUCTION_CONFIG.boostBuildersForSourceContainers) {
-            quotas.builders = Math.max(
-                quotas.builders, 
-                CONFIG.CONSTRUCTION_CONFIG.minBuildersForSourceContainers
-            );
-            
-            // Log du boost
-            if (Game.time % 20 == 0) {
-                console.log(`[CONSTRUCTION BOOST] ${missingSourceContainers} containers sources manquants -> ${quotas.builders} builders requis`);
-            }
-        }
-    }
+    // Calculer les quotas
+    let workerQuota = (quotas.harvesters || 0) + 
+                      (quotas.builders || 0) + 
+                      (quotas.upgraders || 0) + 
+                      (quotas.repairers || 0);
     
-    // Log de la phase (debug)
-    if (Game.time % 100 == 0) {
-        console.log("=== Phase actuelle: " + phase + " ===");
-        console.log("Miners: " + creepCounts.miners + "/" + MinerManager.getRequiredMinerCount(spawn.room));
-        console.log("Containers: " + containers.length);
-        console.log("Containers sources manquants: " + missingSourceContainers);
-        console.log("Sites de construction: " + constructionSites.length);
-    }
-    
-    // Vérifier si on a assez d'énergie pour spawn (utilise le seuil par phase)
-    if (!CONFIG.hasEnoughEnergyToSpawn(spawn.room, phase)) {
-        return;
-    }
-    
-    // Créer une liste de besoins avec priorités
-    let spawnNeeds = [];
-    
-    // Calculer les quotas dynamiques
-    let lorryQuota = quotas.lorries === 'auto' 
-        ? CONFIG.calculateLorryCount(creepCounts.miners)
-        : quotas.lorries;
-    
-    let minerQuota = quotas.miners === 'auto'
-        ? MinerManager.getRequiredMinerCount(spawn.room)
+    let minerQuota = quotas.miners === 'auto' 
+        ? MinerManager.getRequiredMinerCount(room)
         : quotas.miners;
     
-    // Debug: log des quotas
-    if (Game.time % 10 == 0) {
-        console.log('[ORCHESTRATOR] Quotas - H:' + quotas.harvesters + ' M:' + minerQuota + ' L:' + lorryQuota + ' R:' + quotas.repairers + ' U:' + quotas.upgraders + ' B:' + quotas.builders);
-        console.log('[ORCHESTRATOR] Counts - H:' + creepCounts.harvesters + ' M:' + creepCounts.miners + ' L:' + creepCounts.lorries + ' R:' + creepCounts.repairers + ' U:' + creepCounts.upgraders + ' B:' + creepCounts.builders);
+    let lorryQuota = quotas.lorries === 'auto'
+        ? CONFIG.calculateLorryCount(miners)
+        : quotas.lorries;
+    
+    // Priorités de spawn
+    let spawnNeeds = [];
+    
+    // Workers polyvalents (priorité haute en early game)
+    if (workers < workerQuota) {
+        spawnNeeds.push({ type: 'worker', priority: phase === 'BOOTSTRAP' ? 1 : 3 });
     }
     
-    // Ajouter les besoins à la liste
-    if (creepCounts.harvesters < quotas.harvesters) {
-        spawnNeeds.push({ role: 'harvester', priority: CONFIG.SPAWN_PRIORITY.harvesters });
+    // Miners
+    if (miners < minerQuota && MinerManager.canSpawnMiners(room)) {
+        spawnNeeds.push({ type: 'miner', priority: 2 });
     }
     
-    // 🔧 BOOST : Si containers sources manquent, les builders deviennent TRÈS prioritaires
-    let builderPriority = CONFIG.SPAWN_PRIORITY.builders;
-    if (missingSourceContainers > 0) {
-        builderPriority = 0.5; // Plus prioritaire que les harvesters !
+    // Lorries
+    if (lorries < lorryQuota) {
+        spawnNeeds.push({ type: 'lorry', priority: 4 });
     }
     
-    if (creepCounts.builders < quotas.builders) {
-        spawnNeeds.push({ role: 'builder', priority: builderPriority });
+    // LDH
+    if (ldh < quotas.longDistanceHarvesters) {
+        spawnNeeds.push({ type: 'ldh', priority: 5 });
     }
     
-    // Miners : vérifier qu'on peut les créer (containers présents)
-    if (creepCounts.miners < minerQuota && MinerManager.canSpawnMiners(spawn.room)) {
-        spawnNeeds.push({ role: 'miner', priority: CONFIG.SPAWN_PRIORITY.miners });
-        if (Game.time % 10 == 0) {
-            console.log('[ORCHESTRATOR] Besoin de miner détecté : ' + creepCounts.miners + '/' + minerQuota);
-        }
-    }
+    if (spawnNeeds.length === 0) return;
     
-    if (creepCounts.lorries < lorryQuota) {
-        spawnNeeds.push({ role: 'lorry', priority: CONFIG.SPAWN_PRIORITY.lorries });
-    }
-    if (creepCounts.upgraders < quotas.upgraders) {
-        spawnNeeds.push({ role: 'upgrader', priority: CONFIG.SPAWN_PRIORITY.upgraders });
-    }
-    if (creepCounts.repairers < quotas.repairers) {
-        spawnNeeds.push({ role: 'repairer', priority: CONFIG.SPAWN_PRIORITY.repairers });
-    }
-    if (creepCounts.longDistanceHarvesters < quotas.longDistanceHarvesters) {
-        spawnNeeds.push({ role: 'longDistanceHarvester', priority: CONFIG.SPAWN_PRIORITY.longDistanceHarvesters });
-    }
-    
-    // Trier par priorité (plus petit = plus prioritaire)
+    // Spawn le plus prioritaire
     spawnNeeds.sort((a, b) => a.priority - b.priority);
+    let need = spawnNeeds[0];
     
-    // Debug : afficher les besoins
-    if (spawnNeeds.length > 0 && Game.time % 10 == 0) {
-        console.log('[ORCHESTRATOR] Besoins détectés : ' + spawnNeeds.map(n => n.role + '(' + n.priority + ')').join(', '));
+    spawnCreep(spawn, need.type, phase);
+}
+
+function spawnCreep(spawn, type, phase) {
+    let energy = phase === 'PRODUCTION' && CONFIG.ENERGY_CONFIG.useMaxEnergyInProduction
+        ? spawn.room.energyCapacityAvailable
+        : spawn.room.energyAvailable;
+    
+    let name = type.charAt(0).toUpperCase() + type.slice(1) + '_' + Game.time;
+    let body, memory;
+    
+    switch(type) {
+        case 'worker':
+            // Worker polyvalent : pattern [WORK, CARRY, MOVE]
+            body = getAdaptiveBody(energy, 'worker', phase);
+            memory = { role: 'worker', currentTask: null }; // Pas de rôle fixe !
+            break;
+            
+        case 'miner':
+            let assignment = MinerManager.getNextMinerAssignment(spawn.room);
+            if (!assignment) return;
+            
+            body = MinerManager.createMinerBody(energy, CONFIG.BODY_SIZE_MULTIPLIER.miner || 1.0);
+            memory = {
+                role: 'miner',
+                sourceId: assignment.sourceId,
+                linkId: assignment.linkId
+            };
+            break;
+            
+        case 'lorry':
+            body = getAdaptiveBody(energy, 'lorry', phase);
+            memory = { role: 'lorry', working: false };
+            break;
+            
+        case 'ldh':
+            body = [MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,ATTACK];
+            memory = {
+                role: 'longDistanceHarvester',
+                home: CONFIG.HOME_ROOM,
+                target: CONFIG.TARGET_ROOM,
+                working: false
+            };
+            break;
     }
     
-    // Spawn le creep le plus prioritaire
-    if (spawnNeeds.length > 0) {
-        let need = spawnNeeds[0];
-        spawnCreepByRole(spawn, need.role, phase);
+    let result = spawn.spawnCreep(body, name, { memory: memory });
+    
+    if (result === OK) {
+        console.log(`[${phase}] ✅ Spawning ${type}: ${name}`);
     }
 }
 
-// ========== FONCTIONS DE DÉTECTION DE PHASE ==========
-
-function getPhase(minerCount, nbSources, containerCount, constructionSiteCount) {
-    // Phase BOOTSTRAP : Pas de containers construits
-    if (containerCount == 0) {
-        return 'BOOTSTRAP';
-    }
-    
-    // Phase CONSTRUCTION : On a des containers mais pas tous les miners
-    if (minerCount < containerCount || containerCount < nbSources) {
-        return 'CONSTRUCTION';
-    }
-    
-    // Phase PRODUCTION : Tous les miners et containers sont en place
-    return 'PRODUCTION';
-}
-
-// ========== FONCTION DE CRÉATION DE CORPS ADAPTATIF ==========
-
+// Reste identique...
 function getAdaptiveBody(energy, type, phase) {
-    // Appliquer le multiplicateur de taille depuis la config
     let multiplier = CONFIG.BODY_SIZE_MULTIPLIER[type] || 1.0;
     
-    if (type == 'worker') {
-        // Pour builder, upgrader, harvester, repairer : pattern [WORK, CARRY, MOVE]
-        // Coût : 200 par unité
-        if (energy < 200) return [WORK, CARRY, MOVE]; // Minimum
+    if (type === 'worker') {
+        if (energy < 200) return [WORK, CARRY, MOVE];
         
         let units = Math.floor(energy / 200);
         units = Math.floor(units * multiplier);
-        units = Math.min(units, 16); // Max 16 unités = 48 parts
+        units = Math.min(units, 16);
         
         let body = [];
         for (let i = 0; i < units; i++) {
@@ -281,14 +137,12 @@ function getAdaptiveBody(energy, type, phase) {
         return body;
     }
     
-    if (type == 'lorry') {
-        // Pour lorry : pattern [CARRY, CARRY, MOVE]
-        // Coût : 150 par unité
-        if (energy < 150) return [CARRY, MOVE]; // Minimum
+    if (type === 'lorry') {
+        if (energy < 150) return [CARRY, MOVE];
         
         let units = Math.floor(energy / 150);
         units = Math.floor(units * multiplier);
-        units = Math.min(units, 16); // Max 16 unités = 48 parts
+        units = Math.min(units, 16);
         
         let body = [];
         for (let i = 0; i < units; i++) {
@@ -297,104 +151,5 @@ function getAdaptiveBody(energy, type, phase) {
         return body;
     }
     
-    // Par défaut
     return [WORK, CARRY, MOVE];
-}
-
-// ========== FONCTION DE SPAWN PAR RÔLE ==========
-
-function spawnCreepByRole(spawn, role, phase) {
-    let newName = role.charAt(0).toUpperCase() + role.slice(1) + '_' + Game.time;
-    let body;
-    let memory;
-    
-    // Déterminer l'énergie disponible
-    let availableEnergy = spawn.room.energyAvailable;
-    if (phase === 'PRODUCTION' && CONFIG.ENERGY_CONFIG.useMaxEnergyInProduction) {
-        availableEnergy = spawn.room.energyCapacityAvailable;
-    }
-    
-    switch(role) {
-        case 'harvester':
-            body = getAdaptiveBody(availableEnergy, 'worker', phase);
-            memory = { role: 'harvester', working: false };
-            break;
-            
-        case 'upgrader':
-            body = getAdaptiveBody(availableEnergy, 'worker', phase);
-            memory = { role: 'upgrader', working: false };
-            break;
-            
-        case 'builder':
-            body = getAdaptiveBody(availableEnergy, 'worker', phase);
-            memory = { role: 'builder', working: false };
-            break;
-            
-        case 'repairer':
-            body = getAdaptiveBody(availableEnergy, 'worker', phase);
-            memory = { role: 'repairer', working: false };
-            break;
-            
-        case 'lorry':
-            body = getAdaptiveBody(availableEnergy, 'lorry', phase);
-            memory = { role: 'lorry', working: false };
-            break;
-            
-        case 'miner':
-            // Utiliser le MinerManager pour créer le corps et l'assignation
-            let assignment = MinerManager.getNextMinerAssignment(spawn.room);
-            
-            if (!assignment) {
-                console.log('[ORCHESTRATOR] ❌ Aucune source disponible pour miner');
-                return;
-            }
-            
-            body = MinerManager.createMinerBody(
-                availableEnergy, 
-                CONFIG.BODY_SIZE_MULTIPLIER.miner || 1.0
-            );
-            
-            memory = {
-                role: 'miner',
-                sourceId: assignment.sourceId,
-                linkId: assignment.linkId
-            };
-            break;
-            
-        case 'longDistanceHarvester':
-            // Body spécial avec ATTACK
-            body = [MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,WORK,CARRY,MOVE,ATTACK];
-            if (availableEnergy < 1250) {
-                body = getAdaptiveBody(availableEnergy, 'worker', phase);
-                body.push(ATTACK);
-            }
-            memory = {
-                role: 'longDistanceHarvester',
-                home: CONFIG.HOME_ROOM,
-                target: CONFIG.TARGET_ROOM,
-                sourceIndex: 0,
-                working: false
-            };
-            break;
-            
-        default:
-            console.log('[ORCHESTRATOR] Rôle inconnu: ' + role);
-            return;
-    }
-    
-    // Spawn le creep
-    let result = spawn.spawnCreep(body, newName, { memory: memory });
-    
-    if (result == OK) {
-        console.log(`[${phase}] ✅ Spawning ${role}: ${newName}`);
-        if (role === 'miner' && memory.sourceId) {
-            console.log(`  └─ Assigné à source ${memory.sourceId}`);
-        }
-    } else if (result == ERR_NOT_ENOUGH_ENERGY) {
-        // Normal, on attendra le prochain tick
-    } else if (result == ERR_BUSY) {
-        // Normal, spawn occupé
-    } else {
-        console.log(`[ERROR] ❌ Spawn failed for ${role}: ${result}`);
-    }
 }

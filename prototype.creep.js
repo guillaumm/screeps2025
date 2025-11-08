@@ -1,32 +1,34 @@
-// prototype.creep - Version refactorée avec configuration centralisée
+// prototype.creep - Version task-based ultralight
 
+const TaskManager = require('module.taskManager');
 const CONFIG = require('config.orchestrator');
 
-var roles = {
-    harvester: require('role.harvester'),
-    upgrader: require('role.upgrader'),
-    builder: require('role.builder'),
-    repairer: require('role.repairer'),
-    longDistanceHarvester: require('role.longDistanceHarvester'),
+// Creeps spécialisés gardent leurs rôles
+var specializedRoles = {
     miner: require('role.miner'),
-    lorry: require('role.lorry')
+    lorry: require('role.lorry'),
+    longDistanceHarvester: require('role.longDistanceHarvester')
 };
 
 Creep.prototype.runRole = function() {
-    roles[this.memory.role].run(this);
+    // Rôles spécialisés (miners, lorries, LDH)
+    if (specializedRoles[this.memory.role]) {
+        specializedRoles[this.memory.role].run(this);
+        return;
+    }
+    
+    // Tous les autres creeps sont des workers polyvalents
+    TaskManager.run(this);
 };
 
 /**
  * Récupère de l'énergie selon la configuration
- * @param {bool} useContainer - Utiliser containers/storage/links
- * @param {bool} useSource - Utiliser les sources directement
+ * Gardé pour compatibilité avec rôles spécialisés
  */
 Creep.prototype.getEnergy = function(useContainer, useSource) {
     let container;
     
-    // Si le creep doit chercher dans les containers/storage/links
     if (useContainer) {
-        
         // CAS SPÉCIAL : Upgraders avec link dédié
         if (this.memory.role == 'upgrader' && CONFIG.CREEP_BEHAVIOR.upgradersUseDedicatedLink) {
             let upgraderLink = CONFIG.getUpgraderLink(this.room);
@@ -35,11 +37,11 @@ Creep.prototype.getEnergy = function(useContainer, useSource) {
                 if (this.withdraw(upgraderLink, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
                     this.moveTo(upgraderLink);
                 }
-                return; // On a trouvé le link, pas besoin de chercher ailleurs
+                return;
             }
         }
         
-        // Chercher le container/storage/link le plus proche avec assez d'énergie
+        // Chercher container/storage/link
         container = this.pos.findClosestByPath(FIND_STRUCTURES, {
             filter: s => (
                 s.structureType == STRUCTURE_CONTAINER ||
@@ -48,7 +50,6 @@ Creep.prototype.getEnergy = function(useContainer, useSource) {
             ) && s.store[RESOURCE_ENERGY] > CONFIG.ENERGY_CONFIG.minContainerEnergy
         });
         
-        // Si on a trouvé un container
         if (container != undefined) {
             if (this.withdraw(container, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
                 this.moveTo(container, {reusePath: 50});
@@ -57,10 +58,8 @@ Creep.prototype.getEnergy = function(useContainer, useSource) {
         }
     }
     
-    // Si pas de container trouvé et qu'on peut utiliser les sources
     if (container == undefined && useSource) {
-        
-        // D'abord essayer de ramasser l'énergie tombée
+        // Ramasser énergie tombée
         let droppedEnergy = this.pos.findClosestByRange(FIND_DROPPED_RESOURCES);
         if (droppedEnergy) {
             if (this.pickup(droppedEnergy) == ERR_NOT_IN_RANGE) {
@@ -69,7 +68,7 @@ Creep.prototype.getEnergy = function(useContainer, useSource) {
             return;
         }
         
-        // Ensuite récolter à la source
+        // Récolter à la source
         var source = this.pos.findClosestByPath(FIND_SOURCES_ACTIVE);
         if (source && this.harvest(source) == ERR_NOT_IN_RANGE) {
             this.moveTo(source, {reusePath: 50});
