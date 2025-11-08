@@ -8,10 +8,10 @@ const MinerManager = require('module.minerManager');
 const AutoContainerPlacer = require('module.autoContainerPlacer');
 const Reporter = require('module.reporter');
 
-// Nettoyage de la mémoire
-require('prototype.spawn')();
-require('prototype.tower')();
-require('prototype.creep')();
+// Charger les prototypes (pas de parenthèses, ce ne sont pas des fonctions)
+require('prototype.spawn');
+require('prototype.tower');
+require('prototype.creep');
 
 module.exports.loop = function () {
     
