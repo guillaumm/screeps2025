@@ -1,4 +1,4 @@
-// prototype.creep - Version task-based ultralight avec support des workers
+// prototype.creep - Version task-based ultralight
 
 const TaskManager = require('module.taskManager');
 const CONFIG = require('config.orchestrator');
@@ -11,20 +11,13 @@ var specializedRoles = {
 };
 
 Creep.prototype.runRole = function() {
-    // 🔧 WORKERS POLYVALENTS utilisent le TaskManager
-    if (this.memory.role === 'worker') {
-        TaskManager.run(this);
-        return;
-    }
-    
     // Rôles spécialisés (miners, lorries, LDH)
     if (specializedRoles[this.memory.role]) {
         specializedRoles[this.memory.role].run(this);
         return;
     }
     
-    // 🔧 FALLBACK : Si rôle inconnu, utiliser TaskManager quand même
-    console.log(`⚠️ Rôle inconnu pour ${this.name}: ${this.memory.role} - Using TaskManager`);
+    // Tous les autres creeps sont des workers polyvalents
     TaskManager.run(this);
 };
 
