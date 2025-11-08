@@ -1,8 +1,9 @@
 /*
-Version refactorée avec système de phases de démarrage
+Version refactorisée avec système de phases de démarrage
 + Orchestrateur configurable avec seuils d'énergie par phase
 + Système de rapport automatique
 + Gestion centralisée des miners
++ Placement automatique des containers sources
 */
 
 // Import modules
@@ -14,17 +15,20 @@ require('prototype.spawn');
 const CONFIG = require('config.orchestrator');
 const Reporter = require('module.reporter');
 const MinerManager = require('module.minerManager');
+const ConstructionManager = require('module.constructionManager');
+const AutoContainerPlacer = require('module.autoContainerPlacer');
 
 module.exports.loop = function() {
     
     // Récupérer le spawn principal
     let mainSpawn = Game.spawns[Object.keys(Game.spawns)[0]];
-        // ========== PLACEMENT AUTOMATIQUE DES CONTAINERS SOURCES ==========
-    if (CONFIG.CONSTRUCTION_CONFIG.autoPlaceSourceContainers) {
+    
+    // ========== PLACEMENT AUTOMATIQUE DES CONTAINERS SOURCES ==========
+    if (CONFIG.CONSTRUCTION_CONFIG && CONFIG.CONSTRUCTION_CONFIG.autoPlaceSourceContainers) {
         if (Game.time % CONFIG.CONSTRUCTION_CONFIG.autoPlaceInterval === 0) {
             let placed = AutoContainerPlacer.placeAllMissingContainers(mainSpawn.room);
             if (placed > 0) {
-                console.log(`[AUTO-PLACER] 🏗️ ${placed} container(s) source(s) placé(s) !`);
+                console.log(`[AUTO-PLACER] 🏗️ ${placed} container(s) placé(s)`);
             }
         }
     }
@@ -32,11 +36,7 @@ module.exports.loop = function() {
     // ========== RAPPORT PÉRIODIQUE ==========
     if (Game.time % CONFIG.REPORT_INTERVAL == 0) {
         Reporter.generateReport(mainSpawn);
-        // Ajouter le rapport des containers
-        console.log(AutoContainerPlacer.generateContainerReport(mainSpawn.room));
     }
-
-
     
     // Gestion du CPU bucket
     if(Game.cpu.bucket > 9000) {
@@ -108,17 +108,12 @@ module.exports.loop = function() {
 
 // ========== FONCTION DE SPAWN ORCHESTRÉE ==========
 
-// ========== FONCTION DE SPAWN ORCHESTRÉE - VERSION AMÉLIORÉE ==========
-
 function spawnWithOrchestrator(spawn) {
     
     // Ne pas essayer de spawn si le spawn est occupé
     if (spawn.spawning) {
         return;
     }
-    
-    // Import du ConstructionManager
-    const ConstructionManager = require('module.constructionManager');
     
     // Comptage des creeps par rôle
     let creepCounts = {
@@ -147,16 +142,20 @@ function spawnWithOrchestrator(spawn) {
     let quotas = CONFIG.getQuotasForPhase(phase);
     
     // 🔧 AJUSTEMENT DYNAMIQUE : Booster les builders si containers sources manquent
-    let missingSourceContainers = ConstructionManager.countMissingSourceContainers(spawn.room);
-    if (missingSourceContainers > 0 && CONFIG.CONSTRUCTION_CONFIG.boostBuildersForSourceContainers) {
-        quotas.builders = Math.max(
-            quotas.builders, 
-            CONFIG.CONSTRUCTION_CONFIG.minBuildersForSourceContainers
-        );
+    let missingSourceContainers = 0;
+    if (ConstructionManager && ConstructionManager.countMissingSourceContainers) {
+        missingSourceContainers = ConstructionManager.countMissingSourceContainers(spawn.room);
         
-        // Log du boost
-        if (Game.time % 20 == 0) {
-            console.log(`[CONSTRUCTION BOOST] ${missingSourceContainers} containers sources manquants -> ${quotas.builders} builders requis`);
+        if (missingSourceContainers > 0 && CONFIG.CONSTRUCTION_CONFIG && CONFIG.CONSTRUCTION_CONFIG.boostBuildersForSourceContainers) {
+            quotas.builders = Math.max(
+                quotas.builders, 
+                CONFIG.CONSTRUCTION_CONFIG.minBuildersForSourceContainers
+            );
+            
+            // Log du boost
+            if (Game.time % 20 == 0) {
+                console.log(`[CONSTRUCTION BOOST] ${missingSourceContainers} containers sources manquants -> ${quotas.builders} builders requis`);
+            }
         }
     }
     
@@ -242,8 +241,6 @@ function spawnWithOrchestrator(spawn) {
         spawnCreepByRole(spawn, need.role, phase);
     }
 }
-
-
 
 // ========== FONCTIONS DE DÉTECTION DE PHASE ==========
 

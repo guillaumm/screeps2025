@@ -255,11 +255,13 @@ module.exports = {
         defendersPerHostile: 0.5
     },
     
-    // ========== CONFIGURATION DES CONSTRUCTIONS ==========
+
+        // ========== CONFIGURATION DES CONSTRUCTIONS ==========
     
     CONSTRUCTION_CONFIG: {
         // Distance max pour qu'un container soit considéré comme "container source"
-        sourceContainerMaxRange: 2,
+        // CRITIQUE: Le miner se place SUR le container, donc distance = 1 obligatoire !
+        sourceContainerMaxRange: 1,
         
         // Nombre minimum de builders quand des containers sources sont en construction
         minBuildersForSourceContainers: 2,
@@ -271,7 +273,11 @@ module.exports = {
         boostBuildersForSourceContainers: true,
         
         // Pause sur les autres constructions tant que containers sources pas finis
-        pauseOtherConstructionsDuringSourceContainers: false
+        pauseOtherConstructionsDuringSourceContainers: false,
+        
+        // Placement automatique des containers sources
+        autoPlaceSourceContainers: true,
+        autoPlaceInterval: 10  // Vérifier tous les X ticks
     },
     
     // ========== ÉCONOMIE ==========
