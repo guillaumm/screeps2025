@@ -1,12 +1,12 @@
 /*
-Main refactorisé : Workers polyvalents + Miners/Lorries spécialisés
-🔧 FIX : Spawne correctement TOUS les miners nécessaires
+main.js - Version complète avec optimisations géographiques
 */
 
 const CONFIG = require('config.orchestrator');
 const MinerManager = require('module.minerManager');
 const AutoContainerPlacer = require('module.autoContainerPlacer');
 const Reporter = require('module.reporter');
+const Visualizer = require('module.visualizer');
 
 // Charger les prototypes
 require('prototype.spawn');
@@ -55,15 +55,22 @@ module.exports.loop = function () {
         manageLinkTransfers(room);
     }
     
-    // Rapport périodique avec statistiques de tâches
+    // 📊 Rapport périodique avec toutes les métriques
     if (Game.time % CONFIG.REPORT_INTERVAL === 0) {
         Reporter.generateReport(mainSpawn);
         reportTaskDistribution(room);
+        reportEfficiency(room);  // 🎯 NOUVEAU
+    }
+    
+    // 📍 Visualisation (si debug activé)
+    if (CONFIG.DEBUG_MODE) {
+        Visualizer.visualizeRoom(room);
+        Visualizer.displayRoomStats(room);
     }
 };
 
 /**
- * 🔧 FIX : Spawn amélioré avec gestion correcte des miners multiples
+ * Spawn avec orchestrateur
  */
 function spawnWithOrchestrator(spawn) {
     if (spawn.spawning) return;
@@ -80,7 +87,7 @@ function spawnWithOrchestrator(spawn) {
     let lorries = _.filter(Game.creeps, c => c.memory.role === 'lorry' && c.room.name === room.name).length;
     let ldh = _.filter(Game.creeps, c => c.memory.role === 'longDistanceHarvester').length;
     
-    // 🎯 NOUVEAU : Compter les miners en cours de spawn
+    // Compter les miners en cours de spawn
     let minersSpawning = 0;
     for (let spawnName in Game.spawns) {
         let s = Game.spawns[spawnName];
@@ -110,15 +117,21 @@ function spawnWithOrchestrator(spawn) {
         ? CONFIG.calculateLorryCount(miners)
         : quotas.lorries;
     
+    // 🎯 NOUVEAU : Réduire besoin de lorries si workers font le transfer
+    let situation = analyzeRoomSituation(room);
+    if (situation.workersDoingTransfer > 0) {
+        lorryQuota = Math.max(0, lorryQuota - 1);
+    }
+    
     // Priorités de spawn
     let spawnNeeds = [];
     
-    // 🔧 BOOTSTRAP CRITIQUE : Si aucun creep, TOUJOURS spawner un worker
+    // Bootstrap critique
     if (workers === 0 && miners === 0 && lorries === 0) {
         console.log('⚠️ BOOTSTRAP CRITIQUE : Aucun creep vivant !');
         spawnNeeds.push({ type: 'worker', priority: 0, emergency: true });
     }
-    // 🎯 NOUVEAU : Prioriser miners si manquants (avant workers)
+    // Miners manquants
     else if ((miners + minersSpawning) < minerQuota && MinerManager.canSpawnMiners(room)) {
         spawnNeeds.push({ type: 'miner', priority: 1 });
     }
@@ -127,8 +140,8 @@ function spawnWithOrchestrator(spawn) {
         spawnNeeds.push({ type: 'worker', priority: phase === 'BOOTSTRAP' ? 2 : 3 });
     }
     
-    // Lorries (seulement si miners présents)
-    if (lorries < lorryQuota && miners > 0) {
+    // Lorries (seulement si vraiment nécessaires)
+    if (lorries < lorryQuota && miners > 0 && situation.workersDoingTransfer < 2) {
         spawnNeeds.push({ type: 'lorry', priority: 4 });
     }
     
@@ -147,10 +160,30 @@ function spawnWithOrchestrator(spawn) {
 }
 
 /**
+ * 🎯 NOUVEAU : Analyse de la situation pour spawn adaptatif
+ */
+function analyzeRoomSituation(room) {
+    let workers = _.filter(Game.creeps, c => 
+        c.room.name === room.name && 
+        !['miner', 'lorry', 'longDistanceHarvester'].includes(c.memory.role)
+    );
+    
+    let workersDoingTransfer = 0;
+    for (let creep of workers) {
+        if (creep.memory.currentTask === 'transfer') {
+            workersDoingTransfer++;
+        }
+    }
+    
+    return {
+        workersDoingTransfer: workersDoingTransfer
+    };
+}
+
+/**
  * Spawne un creep du type demandé
  */
 function spawnCreep(spawn, type, phase, emergency = false) {
-    // En mode emergency (bootstrap critique), utiliser l'énergie disponible
     let energy;
     if (emergency) {
         energy = spawn.room.energyAvailable;
@@ -171,7 +204,8 @@ function spawnCreep(spawn, type, phase, emergency = false) {
                 role: 'worker',
                 currentTask: null,
                 taskTarget: null,
-                harvestSourceId: null
+                harvestSourceId: null,
+                harvestMode: null
             };
             break;
             
@@ -189,7 +223,7 @@ function spawnCreep(spawn, type, phase, emergency = false) {
                 linkId: assignment.linkId
             };
             
-            console.log(`🔍 Spawning miner for source ${assignment.sourceId.substring(0, 5)}...`);
+            console.log(`🔷 Spawning miner for source ${assignment.sourceId.substring(0, 5)}...`);
             break;
             
         case 'lorry':
@@ -225,19 +259,16 @@ function getAdaptiveBody(energy, type, phase) {
     let multiplier = CONFIG.BODY_SIZE_MULTIPLIER[type] || 1.0;
     
     if (type === 'worker') {
-        // Corps minimal : 200 energy = [WORK, CARRY, MOVE]
         if (energy < 200) {
-            // Bootstrap critique : 300 energy minimum
             if (energy >= 300) {
                 return [WORK, CARRY, MOVE, WORK, CARRY, MOVE];
             }
             return [WORK, CARRY, MOVE];
         }
         
-        // Calculer combien d'unités [WORK, CARRY, MOVE] on peut faire
         let units = Math.floor(energy / 200);
         units = Math.floor(units * multiplier);
-        units = Math.min(units, 16); // Max 48 parts
+        units = Math.min(units, 16);
         
         let body = [];
         for (let i = 0; i < units; i++) {
@@ -247,14 +278,13 @@ function getAdaptiveBody(energy, type, phase) {
     }
     
     if (type === 'lorry') {
-        // Corps minimal : 150 energy = [CARRY, CARRY, MOVE]
         if (energy < 150) {
             return [CARRY, MOVE];
         }
         
         let units = Math.floor(energy / 150);
         units = Math.floor(units * multiplier);
-        units = Math.min(units, 16); // Max 48 parts
+        units = Math.min(units, 16);
         
         let body = [];
         for (let i = 0; i < units; i++) {
@@ -302,9 +332,38 @@ function calculateCost(body) {
     return body.reduce((sum, part) => sum + (COSTS[part] || 0), 0);
 }
 
+/**
+ * Gestion des transferts de links
+ */
+function manageLinkTransfers(room) {
+    let links = room.find(FIND_MY_STRUCTURES, {
+        filter: s => s.structureType === STRUCTURE_LINK
+    });
+    
+    if (links.length < 2) return;
+    
+    let sourceLinks = links.filter((link, index) => 
+        CONFIG.LINK_BEHAVIOR.sourceLinksIndexes.includes(index)
+    );
+    
+    let targetLinks = links.filter((link, index) => 
+        CONFIG.LINK_BEHAVIOR.targetLinksIndexes.includes(index)
+    );
+    
+    for (let sourceLink of sourceLinks) {
+        if (sourceLink.store[RESOURCE_ENERGY] >= CONFIG.LINK_BEHAVIOR.minEnergyToTransfer) {
+            for (let targetLink of targetLinks) {
+                if (targetLink.store.getFreeCapacity(RESOURCE_ENERGY) >= 400) {
+                    sourceLink.transferEnergy(targetLink);
+                    break;
+                }
+            }
+        }
+    }
+}
 
 /**
- * 📊 Rapport sur la distribution des tâches (avec politique)
+ * 📊 Rapport sur la distribution des tâches
  */
 function reportTaskDistribution(room) {
     const TaskManager = require('module.taskManager');
@@ -337,40 +396,139 @@ function reportTaskDistribution(room) {
     console.log(`  ${'─'.repeat(38)}`);
     console.log(`  TOTAL Workers:           ${stats.total}`);
     
-    // Afficher l'objectif de la politique
+    if (stats.usingRelays > 0) {
+        console.log(`  🔄 Utilisant relais:     ${stats.usingRelays}`);
+    }
+    
     let targetRatio = (policy.minUpgradersRatio * 100).toFixed(0);
     let actualRatio = (stats.upgrade / stats.total * 100).toFixed(0);
     let icon = actualRatio >= targetRatio ? '✅' : '⚠️';
     console.log(`  ${icon} Ratio upgrade:          ${actualRatio}% / ${targetRatio}% (objectif)`);
 }
+
 /**
- * Gestion des transferts de links
+ * 📊 Rapport sur l'efficacité géographique
  */
-function manageLinkTransfers(room) {
-    let links = room.find(FIND_MY_STRUCTURES, {
-        filter: s => s.structureType === STRUCTURE_LINK
-    });
+function reportEfficiency(room) {
+    const TaskManager = require('module.taskManager');
+    const CONFIG = require('config.orchestrator');
     
-    if (links.length < 2) return;
+    console.log('\n⚡ EFFICACITÉ & OPTIMISATIONS');
+    console.log('-'.repeat(40));
     
-    // Links sources (avec miners)
-    let sourceLinks = links.filter((link, index) => 
-        CONFIG.LINK_BEHAVIOR.sourceLinksIndexes.includes(index)
+    let workers = _.filter(Game.creeps, c => 
+        c.room.name === room.name && 
+        !['miner', 'lorry', 'longDistanceHarvester'].includes(c.memory.role)
     );
     
-    // Links cibles (upgrader, storage)
-    let targetLinks = links.filter((link, index) => 
-        CONFIG.LINK_BEHAVIOR.targetLinksIndexes.includes(index)
-    );
+    if (workers.length === 0) {
+        console.log('  Aucun worker actif');
+        return;
+    }
     
-    for (let sourceLink of sourceLinks) {
-        if (sourceLink.store[RESOURCE_ENERGY] >= CONFIG.LINK_BEHAVIOR.minEnergyToTransfer) {
-            for (let targetLink of targetLinks) {
-                if (targetLink.store.getFreeCapacity(RESOURCE_ENERGY) >= 400) {
-                    sourceLink.transferEnergy(targetLink);
-                    break;
-                }
+    let totalDistance = 0;
+    let workersWithTarget = 0;
+    let workersUsingRelays = 0;
+    let workersIdle = 0;
+    let energyUtilization = 0;
+    
+    let taskDistances = {
+        harvest: [],
+        transfer: [],
+        build: [],
+        repair: [],
+        upgrade: []
+    };
+    
+    for (let creep of workers) {
+        let task = creep.memory.currentTask;
+        let target = Game.getObjectById(creep.memory.taskTarget);
+        
+        let energyPercent = creep.store[RESOURCE_ENERGY] / creep.store.getCapacity(RESOURCE_ENERGY);
+        energyUtilization += energyPercent;
+        
+        if (!task) {
+            workersIdle++;
+            continue;
+        }
+        
+        if (target) {
+            let distance = creep.pos.getRangeTo(target);
+            totalDistance += distance;
+            workersWithTarget++;
+            
+            if (taskDistances[task]) {
+                taskDistances[task].push(distance);
             }
         }
+        
+        if (creep.memory.harvestMode === 'relay') {
+            workersUsingRelays++;
+        }
     }
+    
+    let avgDistance = workersWithTarget > 0 ? (totalDistance / workersWithTarget).toFixed(1) : 0;
+    let avgEnergy = (energyUtilization / workers.length * 100).toFixed(1);
+    
+    console.log(`  Workers actifs:          ${workers.length}`);
+    console.log(`  Distance moy. cible:     ${avgDistance} cases`);
+    console.log(`  Énergie moyenne:         ${avgEnergy}%`);
+    console.log(`  Utilisant relais:        ${workersUsingRelays}`);
+    if (workersIdle > 0) {
+        console.log(`  ⚠️  Inactifs:              ${workersIdle}`);
+    }
+    
+    console.log('\n  Distances par tâche:');
+    for (let task in taskDistances) {
+        if (taskDistances[task].length > 0) {
+            let avg = (taskDistances[task].reduce((a, b) => a + b, 0) / taskDistances[task].length).toFixed(1);
+            let emoji = getTaskEmoji(task);
+            console.log(`    ${emoji} ${task.padEnd(10)}: ${avg} cases (${taskDistances[task].length} workers)`);
+        }
+    }
+    
+    if (CONFIG.TASK_CONFIG.useEnergyRelays && workersUsingRelays > 0) {
+        let relayEfficiency = (workersUsingRelays / workers.length * 100).toFixed(1);
+        console.log(`\n  🔄 Efficacité relais:    ${relayEfficiency}%`);
+    }
+    
+    let efficiencyScore = calculateEfficiencyScore(avgDistance, avgEnergy, workersIdle, workers.length);
+    let grade = getEfficiencyGrade(efficiencyScore);
+    console.log(`\n  📈 Score d'efficacité:   ${efficiencyScore}/100 (${grade})`);
+}
+
+function getTaskEmoji(task) {
+    const EMOJIS = {
+        'harvest': '⛏️',
+        'build': '🔨',
+        'repair': '🔧',
+        'upgrade': '⚡',
+        'transfer': '📦'
+    };
+    return EMOJIS[task] || '❓';
+}
+
+function calculateEfficiencyScore(avgDistance, avgEnergy, idle, total) {
+    let score = 100;
+    
+    if (avgDistance > 5) {
+        score -= Math.min(30, (avgDistance - 5) * 2);
+    }
+    
+    if (avgEnergy < 70) {
+        score -= (70 - avgEnergy) / 2;
+    }
+    
+    let idlePercent = (idle / total) * 100;
+    score -= idlePercent * 2;
+    
+    return Math.max(0, Math.round(score));
+}
+
+function getEfficiencyGrade(score) {
+    if (score >= 90) return '⭐⭐⭐ Excellent';
+    if (score >= 75) return '⭐⭐ Très bon';
+    if (score >= 60) return '⭐ Bon';
+    if (score >= 40) return '⚠️ Moyen';
+    return '❌ Faible';
 }

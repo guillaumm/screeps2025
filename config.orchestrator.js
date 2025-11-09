@@ -113,6 +113,13 @@ module.exports = {
         strictSourceControl: true,  // Empêcher harvest si miner présent
         allowHarvestWithoutMiner: true,  // Autoriser harvest si pas de miner
         
+        // 📍 NOUVEAU : Optimisation géographique
+        minEnergyToStartWork: 0.3,  // 30% minimum pour commencer une tâche productive
+        useEnergyRelays: true,  // Utiliser les structures comme relais
+        maxRelayDetour: 2.0,  // Facteur max de détour pour un relais (2x = acceptable)
+        nearbyTaskRange: 10,  // Range pour chercher des tâches proches
+        geographicBonusEnabled: true,  // Bonus pour tâches proches
+        
         // Upgrade
         minUpgradersAlways: 0,
         upgradersCanDoOtherTasks: true,
