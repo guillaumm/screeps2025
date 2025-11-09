@@ -302,6 +302,47 @@ function calculateCost(body) {
     return body.reduce((sum, part) => sum + (COSTS[part] || 0), 0);
 }
 
+
+/**
+ * 📊 Rapport sur la distribution des tâches (avec politique)
+ */
+function reportTaskDistribution(room) {
+    const TaskManager = require('module.taskManager');
+    const CONFIG = require('config.orchestrator');
+    
+    let stats = TaskManager.getTaskStats(room);
+    let policy = CONFIG.getActivePolicy();
+    
+    console.log('\n📋 DISTRIBUTION DES TÂCHES');
+    console.log('-'.repeat(40));
+    console.log(`  📍 Politique active:     ${policy.name}`);
+    console.log(`     ${policy.description}`);
+    console.log('');
+    
+    if (stats.total === 0) {
+        console.log('  Aucun worker polyvalent actif');
+        return;
+    }
+    
+    let percent = (count) => `(${(count / stats.total * 100).toFixed(1)}%)`;
+    
+    console.log(`  ⛏️  Harvest:              ${stats.harvest.toString().padStart(2)} ${percent(stats.harvest)}`);
+    console.log(`  📦 Transfer:             ${stats.transfer.toString().padStart(2)} ${percent(stats.transfer)}`);
+    console.log(`  🔨 Build:                ${stats.build.toString().padStart(2)} ${percent(stats.build)}`);
+    console.log(`  🔧 Repair:               ${stats.repair.toString().padStart(2)} ${percent(stats.repair)}`);
+    console.log(`  ⚡ Upgrade:              ${stats.upgrade.toString().padStart(2)} ${percent(stats.upgrade)}`);
+    if (stats.idle > 0) {
+        console.log(`  ❓ Idle:                 ${stats.idle.toString().padStart(2)} ${percent(stats.idle)}`);
+    }
+    console.log(`  ${'─'.repeat(38)}`);
+    console.log(`  TOTAL Workers:           ${stats.total}`);
+    
+    // Afficher l'objectif de la politique
+    let targetRatio = (policy.minUpgradersRatio * 100).toFixed(0);
+    let actualRatio = (stats.upgrade / stats.total * 100).toFixed(0);
+    let icon = actualRatio >= targetRatio ? '✅' : '⚠️';
+    console.log(`  ${icon} Ratio upgrade:          ${actualRatio}% / ${targetRatio}% (objectif)`);
+}
 /**
  * Gestion des transferts de links
  */
