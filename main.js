@@ -1,6 +1,6 @@
 /*
 Main refactorisé : Workers polyvalents + Miners/Lorries spécialisés
-Gère correctement le bootstrap avec 300 energy
+🔧 FIX : Spawne correctement TOUS les miners nécessaires
 */
 
 const CONFIG = require('config.orchestrator');
@@ -8,7 +8,7 @@ const MinerManager = require('module.minerManager');
 const AutoContainerPlacer = require('module.autoContainerPlacer');
 const Reporter = require('module.reporter');
 
-// Charger les prototypes (pas de parenthèses, ce ne sont pas des fonctions)
+// Charger les prototypes
 require('prototype.spawn');
 require('prototype.tower');
 require('prototype.creep');
@@ -55,14 +55,15 @@ module.exports.loop = function () {
         manageLinkTransfers(room);
     }
     
-    // Rapport périodique
+    // Rapport périodique avec statistiques de tâches
     if (Game.time % CONFIG.REPORT_INTERVAL === 0) {
         Reporter.generateReport(mainSpawn);
+        reportTaskDistribution(room);
     }
 };
 
 /**
- * Spawn simplifié avec workers polyvalents
+ * 🔧 FIX : Spawn amélioré avec gestion correcte des miners multiples
  */
 function spawnWithOrchestrator(spawn) {
     if (spawn.spawning) return;
@@ -78,6 +79,18 @@ function spawnWithOrchestrator(spawn) {
     let miners = MinerManager.getMinerCount(room);
     let lorries = _.filter(Game.creeps, c => c.memory.role === 'lorry' && c.room.name === room.name).length;
     let ldh = _.filter(Game.creeps, c => c.memory.role === 'longDistanceHarvester').length;
+    
+    // 🎯 NOUVEAU : Compter les miners en cours de spawn
+    let minersSpawning = 0;
+    for (let spawnName in Game.spawns) {
+        let s = Game.spawns[spawnName];
+        if (s.spawning) {
+            let spawningCreep = Game.creeps[s.spawning.name];
+            if (spawningCreep && spawningCreep.memory.role === 'miner') {
+                minersSpawning++;
+            }
+        }
+    }
     
     // Déterminer la phase
     let phase = getPhase(miners, room);
@@ -105,14 +118,13 @@ function spawnWithOrchestrator(spawn) {
         console.log('⚠️ BOOTSTRAP CRITIQUE : Aucun creep vivant !');
         spawnNeeds.push({ type: 'worker', priority: 0, emergency: true });
     }
+    // 🎯 NOUVEAU : Prioriser miners si manquants (avant workers)
+    else if ((miners + minersSpawning) < minerQuota && MinerManager.canSpawnMiners(room)) {
+        spawnNeeds.push({ type: 'miner', priority: 1 });
+    }
     // Workers polyvalents
     else if (workers < workerQuota) {
-        spawnNeeds.push({ type: 'worker', priority: phase === 'BOOTSTRAP' ? 1 : 3 });
-    }
-    
-    // Miners (seulement si containers disponibles)
-    if (miners < minerQuota && MinerManager.canSpawnMiners(room)) {
-        spawnNeeds.push({ type: 'miner', priority: 2 });
+        spawnNeeds.push({ type: 'worker', priority: phase === 'BOOTSTRAP' ? 2 : 3 });
     }
     
     // Lorries (seulement si miners présents)
@@ -158,13 +170,17 @@ function spawnCreep(spawn, type, phase, emergency = false) {
             memory = { 
                 role: 'worker',
                 currentTask: null,
-                taskTarget: null
+                taskTarget: null,
+                harvestSourceId: null
             };
             break;
             
         case 'miner':
             let assignment = MinerManager.getNextMinerAssignment(spawn.room);
-            if (!assignment) return;
+            if (!assignment) {
+                console.log('⚠️ Pas d\'assignation de miner disponible');
+                return;
+            }
             
             body = MinerManager.createMinerBody(energy, CONFIG.BODY_SIZE_MULTIPLIER.miner || 1.0);
             memory = {
@@ -172,6 +188,8 @@ function spawnCreep(spawn, type, phase, emergency = false) {
                 sourceId: assignment.sourceId,
                 linkId: assignment.linkId
             };
+            
+            console.log(`🔍 Spawning miner for source ${assignment.sourceId.substring(0, 5)}...`);
             break;
             
         case 'lorry':
@@ -195,7 +213,7 @@ function spawnCreep(spawn, type, phase, emergency = false) {
     if (result === OK) {
         let prefix = emergency ? '🚨' : '✅';
         console.log(`${prefix} [${phase}] Spawning ${type}: ${name} (${body.length} parts, ${calculateCost(body)} energy)`);
-    } else if (result !== OK) {
+    } else if (result !== OK && result !== ERR_NOT_ENOUGH_ENERGY) {
         console.log(`❌ Failed to spawn ${type}: ${result}`);
     }
 }

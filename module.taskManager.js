@@ -1,683 +1,475 @@
 /*
-
-Task Manager - Architecture task-based pour creeps polyvalents
-
-Remplace les 7 fichiers de rÃ´les par un systÃ¨me de prioritÃ©s dynamiques
-
+Task Manager - Version CORRIGÉE avec répartition intelligente
+Résout le problème des workers inactifs et optimise l'utilisation des sources
 */
 
-
-
 const CONFIG = require('config.orchestrator');
-
 const RepairManager = require('module.repairManager');
-
 const ConstructionManager = require('module.constructionManager');
 
-
-
-// DÃ©finition des tasks disponibles avec leurs prioritÃ©s
-
 const TASKS = {
-
     HARVEST: 'harvest',
-
     BUILD: 'build',
-
     REPAIR: 'repair',
-
     UPGRADE: 'upgrade',
-
-    TRANSFER: 'transfer',
-
-    PICKUP: 'pickup'
-
+    TRANSFER: 'transfer'
 };
 
-
-
 module.exports = {
-
     
-
     /**
-
-     * Point d'entrÃ©e principal : assigne et exÃ©cute la meilleure task
-
-     * Remplace tous les role.*.run()
-
+     * Point d'entrée principal
      */
-
     run: function(creep) {
-
-        // Gestion Ã©tat Ã©nergÃ©tique
-
-        if (creep.store[RESOURCE_ENERGY] === 0) {
-
-            creep.memory.currentTask = null;
-
+        // Affichage de la tâche (si configuré)
+        if (CONFIG.TASK_CONFIG.displayTasksWithSay && 
+            Game.time % CONFIG.TASK_CONFIG.sayFrequency === 0) {
+            let emoji = this.getTaskEmoji(creep.memory.currentTask);
+            creep.say(emoji);
+        }
+        
+        // 🔧 FIX CRITIQUE : Gestion correcte des états
+        if (creep.store[RESOURCE_ENERGY] === 0 && creep.memory.currentTask !== TASKS.HARVEST) {
+            // Vide → passer en mode récolte
+            creep.memory.currentTask = TASKS.HARVEST;
             creep.memory.taskTarget = null;
-
         }
-
+        else if (creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0 && creep.memory.currentTask === TASKS.HARVEST) {
+            // Plein → chercher une nouvelle tâche
+            creep.memory.currentTask = null;
+            creep.memory.taskTarget = null;
+        }
         
-
-        // Si pas de task ou task terminÃ©e, en trouver une nouvelle
-
+        // Si pas de tâche ou tâche terminée, en trouver une
         if (!creep.memory.currentTask || this.isTaskComplete(creep)) {
-
             this.assignBestTask(creep);
-
         }
-
         
-
-        // ExÃ©cuter la task actuelle
-
+        // Exécuter la tâche
         this.executeTask(creep);
-
     },
-
     
-
     /**
-
-     * Trouve et assigne la meilleure task selon les prioritÃ©s
-
+     * Assigne la meilleure tâche selon les priorités DYNAMIQUES
      */
-
     assignBestTask: function(creep) {
-
         let room = creep.room;
-
         
-
-        // Si vide d'Ã©nergie â†’ rÃ©colter
-
+        // Si vide → récolter
         if (creep.store[RESOURCE_ENERGY] === 0) {
-
             return this.assignHarvestTask(creep);
-
         }
-
         
-
-        // Sinon, calculer les prioritÃ©s selon l'Ã©tat de la room
-
-        let priorities = this.calculateTaskPriorities(room);
-
+        // Calculer les priorités selon l'état de la room
+        let priorities = this.calculateDynamicPriorities(room);
         
-
-        // Essayer chaque task par ordre de prioritÃ©
-
+        // Essayer chaque tâche par ordre de priorité
         for (let taskType of priorities) {
-
             let assigned = false;
-
             
-
             switch(taskType) {
-
-                case TASKS.BUILD:
-
-                    assigned = this.assignBuildTask(creep);
-
-                    break;
-
-                case TASKS.REPAIR:
-
-                    assigned = this.assignRepairTask(creep);
-
-                    break;
-
-                case TASKS.UPGRADE:
-
-                    assigned = this.assignUpgradeTask(creep);
-
-                    break;
-
                 case TASKS.TRANSFER:
-
                     assigned = this.assignTransferTask(creep);
-
                     break;
-
+                case TASKS.BUILD:
+                    assigned = this.assignBuildTask(creep);
+                    break;
+                case TASKS.REPAIR:
+                    assigned = this.assignRepairTask(creep);
+                    break;
+                case TASKS.UPGRADE:
+                    assigned = this.assignUpgradeTask(creep);
+                    break;
             }
-
             
-
             if (assigned) return;
-
         }
-
         
-
         // Fallback : upgrade
-
         this.assignUpgradeTask(creep);
-
     },
-
     
-
     /**
-
-     * Calcule les prioritÃ©s dynamiques selon l'Ã©tat de la room
-
+     * 🎯 NOUVELLE VERSION : Priorités VRAIMENT dynamiques
      */
-
-    calculateTaskPriorities: function(room) {
-
+    calculateDynamicPriorities: function(room) {
         let priorities = [];
-
         
-
-        // 1. PRIORITÃ‰ ABSOLUE : Containers sources en construction
-
-        let missingContainers = ConstructionManager.countMissingSourceContainers(room);
-
-        if (missingContainers > 0) {
-
-            priorities.push(TASKS.BUILD);
-
-        }
-
-        
-
-        // 2. Structures critiques Ã  rÃ©parer (< 25% HP)
-
-        let criticalRepairs = RepairManager.getRepairStats(room).critical;
-
-        if (criticalRepairs > 0) {
-
-            priorities.push(TASKS.REPAIR);
-
-        }
-
-        
-
-        // 3. Transfer si spawn/extensions vides
-
+        // 1️⃣ CRITIQUE : Spawn/Extensions vides (< 30%)
         let energyPercent = room.energyAvailable / room.energyCapacityAvailable;
-
-        if (energyPercent < 0.8) {
-
+        if (energyPercent < CONFIG.TASK_CONFIG.criticalEnergyThreshold) {
             priorities.push(TASKS.TRANSFER);
-
         }
-
         
-
-        // 4. Constructions normales
-
-        if (room.find(FIND_CONSTRUCTION_SITES).length > 0) {
-
+        // 2️⃣ URGENT : Structures critiques à réparer
+        let stats = RepairManager.getRepairStats(room);
+        if (stats.critical > 0) {
+            priorities.push(TASKS.REPAIR);
+        }
+        
+        // 3️⃣ IMPORTANT : Containers sources en construction
+        let missingContainers = ConstructionManager.countMissingSourceContainers(room);
+        if (missingContainers > 0) {
+            priorities.push(TASKS.BUILD);
+        }
+        
+        // 4️⃣ NORMAL : Remplir spawn/extensions si < 80%
+        if (energyPercent < CONFIG.TASK_CONFIG.transferPriorityThreshold) {
+            if (!priorities.includes(TASKS.TRANSFER)) {
+                priorities.push(TASKS.TRANSFER);
+            }
+        }
+        
+        // 5️⃣ Constructions normales
+        if (ConstructionManager.needsConstruction(room)) {
             if (!priorities.includes(TASKS.BUILD)) {
-
                 priorities.push(TASKS.BUILD);
-
             }
-
         }
-
         
-
-        // 5. RÃ©parations normales
-
-        if (RepairManager.needsRepair(room)) {
-
+        // 6️⃣ Réparations normales
+        if (stats.damaged > 0) {
             if (!priorities.includes(TASKS.REPAIR)) {
-
                 priorities.push(TASKS.REPAIR);
-
             }
-
         }
-
         
-
-        // 6. Upgrade par dÃ©faut
-
+        // 7️⃣ Upgrade (toujours en dernier)
         priorities.push(TASKS.UPGRADE);
-
         
-
+        // 🔧 Garantir un minimum d'upgraders
+        priorities = this.enforceMinimumUpgraders(room, priorities);
+        
         return priorities;
-
     },
-
     
-
     /**
-
-     * Assigne une task de rÃ©colte
-
+     * 🎯 NOUVEAU : Force au moins N creeps à upgrader en permanence
      */
-
+    enforceMinimumUpgraders: function(room, priorities) {
+        let upgraders = _.filter(Game.creeps, c => 
+            c.room.name === room.name && 
+            c.memory.currentTask === TASKS.UPGRADE &&
+            c.store[RESOURCE_ENERGY] > 0
+        ).length;
+        
+        if (upgraders < CONFIG.TASK_CONFIG.minUpgradersAlways) {
+            // Forcer upgrade en priorité
+            priorities = [TASKS.UPGRADE, ...priorities.filter(t => t !== TASKS.UPGRADE)];
+        }
+        
+        return priorities;
+    },
+    
+    /**
+     * 🔧 FIX : Assigne une tâche de récolte INTELLIGENTE
+     * Répartit les workers entre les sources
+     */
     assignHarvestTask: function(creep) {
-
         creep.memory.currentTask = TASKS.HARVEST;
-
-        creep.memory.taskTarget = null;
-
+        
+        // 🎯 NOUVEAU : Choisir la meilleure source
+        let bestSource = this.findBestHarvestSource(creep);
+        if (bestSource) {
+            creep.memory.harvestSourceId = bestSource.id;
+        }
+        
         return true;
-
     },
-
     
-
     /**
-
-     * Assigne une task de construction
-
+     * 🎯 NOUVEAU : Trouve la meilleure source pour un worker
+     * Critères : 
+     * - Containers avec énergie disponible
+     * - Répartition équilibrée des workers
      */
-
-    assignBuildTask: function(creep) {
-
-        let target = ConstructionManager.findPriorityConstructionSite(creep.room, creep);
-
-        if (!target) return false;
-
+    findBestHarvestSource: function(creep) {
+        let room = creep.room;
+        let sources = room.find(FIND_SOURCES);
         
-
-        creep.memory.currentTask = TASKS.BUILD;
-
-        creep.memory.taskTarget = target.id;
-
-        return true;
-
-    },
-
-    
-
-    /**
-
-     * Assigne une task de rÃ©paration
-
-     */
-
-    assignRepairTask: function(creep) {
-
-        let target = RepairManager.findRepairTarget(creep.room, creep);
-
-        if (!target) return false;
-
+        let candidates = [];
         
-
-        creep.memory.currentTask = TASKS.REPAIR;
-
-        creep.memory.taskTarget = target.id;
-
-        return true;
-
-    },
-
-    
-
-    /**
-
-     * Assigne une task d'upgrade
-
-     */
-
-    assignUpgradeTask: function(creep) {
-
-        creep.memory.currentTask = TASKS.UPGRADE;
-
-        creep.memory.taskTarget = creep.room.controller.id;
-
-        return true;
-
-    },
-
-    
-
-    /**
-
-     * Assigne une task de transfer
-
-     */
-
-    assignTransferTask: function(creep) {
-
-        let target = creep.pos.findClosestByPath(FIND_MY_STRUCTURES, {
-
-            filter: s => (
-
-                s.structureType === STRUCTURE_SPAWN ||
-
-                s.structureType === STRUCTURE_EXTENSION
-
-            ) && s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
-
-        });
-
-        
-
-        if (!target) return false;
-
-        
-
-        creep.memory.currentTask = TASKS.TRANSFER;
-
-        creep.memory.taskTarget = target.id;
-
-        return true;
-
-    },
-
-    
-
-    /**
-
-     * ExÃ©cute la task actuelle
-
-     */
-
-    executeTask: function(creep) {
-
-        let task = creep.memory.currentTask;
-
-        
-
-        switch(task) {
-
-            case TASKS.HARVEST:
-
-                this.doHarvest(creep);
-
-                break;
-
-            case TASKS.BUILD:
-
-                this.doBuild(creep);
-
-                break;
-
-            case TASKS.REPAIR:
-
-                this.doRepair(creep);
-
-                break;
-
-            case TASKS.UPGRADE:
-
-                this.doUpgrade(creep);
-
-                break;
-
-            case TASKS.TRANSFER:
-
-                this.doTransfer(creep);
-
-                break;
-
-            default:
-
-                this.assignBestTask(creep);
-
-        }
-
-    },
-
-    
-
-    /**
-
-     * ExÃ©cution : RÃ©colte d'Ã©nergie
-
-     */
-
-    doHarvest: function(creep) {
-
-        // Utiliser la mÃ©thode prototype existante
-
-        let useSource = CONFIG.shouldUseSourcesDirectly(creep, creep.room);
-
-        creep.getEnergy(true, useSource);
-
-    },
-
-    
-
-    /**
-
-     * ExÃ©cution : Construction
-
-     */
-
-    doBuild: function(creep) {
-
-        let target = Game.getObjectById(creep.memory.taskTarget);
-
-        if (!target) {
-
-            creep.memory.currentTask = null;
-
-            return;
-
-        }
-
-        
-
-        if (creep.build(target) === ERR_NOT_IN_RANGE) {
-
-            creep.moveTo(target, {reusePath: 15});
-
-        }
-
-    },
-
-    
-
-    /**
-
-     * ExÃ©cution : RÃ©paration
-
-     */
-
-    doRepair: function(creep) {
-
-        let target = Game.getObjectById(creep.memory.taskTarget);
-
-        if (!target) {
-
-            creep.memory.currentTask = null;
-
-            return;
-
-        }
-
-        
-
-        if (creep.repair(target) === ERR_NOT_IN_RANGE) {
-
-            creep.moveTo(target, {reusePath: 15});
-
-        }
-
-    },
-
-    
-
-    /**
-
-     * ExÃ©cution : Upgrade
-
-     */
-
-    doUpgrade: function(creep) {
-
-        let controller = creep.room.controller;
-
-        if (creep.upgradeController(controller) === ERR_NOT_IN_RANGE) {
-
-            creep.moveTo(controller, {reusePath: 15});
-
-        }
-
-    },
-
-    
-
-    /**
-
-     * ExÃ©cution : Transfer
-
-     */
-
-    doTransfer: function(creep) {
-
-        let target = Game.getObjectById(creep.memory.taskTarget);
-
-        if (!target) {
-
-            creep.memory.currentTask = null;
-
-            return;
-
-        }
-
-        
-
-        if (creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-
-            creep.moveTo(target, {reusePath: 15});
-
-        }
-
-    },
-
-    
-
-    /**
-
-     * VÃ©rifie si une task est terminÃ©e
-
-     */
-
-    isTaskComplete: function(creep) {
-
-        let task = creep.memory.currentTask;
-
-        
-
-        // Harvest terminÃ© si plein
-
-        if (task === TASKS.HARVEST) {
-
-            return creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0;
-
-        }
-
-        
-
-        // Autres tasks terminÃ©es si vide OU target disparue
-
-        if (creep.store[RESOURCE_ENERGY] === 0) {
-
-            return true;
-
-        }
-
-        
-
-        let target = Game.getObjectById(creep.memory.taskTarget);
-
-        if (!target) return true;
-
-        
-
-        // Build terminÃ© si progressTotal atteint
-
-        if (task === TASKS.BUILD) {
-
-            return target.progress >= target.progressTotal;
-
-        }
-
-        
-
-        // Repair terminÃ© si HP max
-
-        if (task === TASKS.REPAIR) {
-
-            return target.hits >= target.hitsMax;
-
-        }
-
-        
-
-        // Transfer terminÃ© si target pleine
-
-        if (task === TASKS.TRANSFER) {
-
-            return target.store.getFreeCapacity(RESOURCE_ENERGY) === 0;
-
-        }
-
-        
-
-        return false;
-
-    },
-
-    
-
-    /**
-
-     * Statistiques pour le rapport
-
-     */
-
-    getTaskStats: function(room) {
-
-        let stats = {
-
-            harvest: 0,
-
-            build: 0,
-
-            repair: 0,
-
-            upgrade: 0,
-
-            transfer: 0,
-
-            idle: 0
-
-        };
-
-        
-
-        for (let name in Game.creeps) {
-
-            let creep = Game.creeps[name];
-
-            if (creep.room.name !== room.name) continue;
-
-            if (creep.memory.role === 'miner' || creep.memory.role === 'lorry') continue;
-
+        for (let source of sources) {
+            // Trouver le container de cette source
+            let container = source.pos.findInRange(FIND_STRUCTURES, 2, {
+                filter: s => s.structureType === STRUCTURE_CONTAINER
+            })[0];
             
-
-            let task = creep.memory.currentTask;
-
-            if (task) {
-
-                stats[task] = (stats[task] || 0) + 1;
-
-            } else {
-
-                stats.idle++;
-
+            if (!container || container.store[RESOURCE_ENERGY] < 50) {
+                continue; // Pas de container ou vide
             }
-
+            
+            // Compter combien de workers vont déjà vers cette source
+            let workersOnSource = _.filter(Game.creeps, c => 
+                c.memory.harvestSourceId === source.id &&
+                c.memory.currentTask === TASKS.HARVEST
+            ).length;
+            
+            candidates.push({
+                source: source,
+                container: container,
+                energy: container.store[RESOURCE_ENERGY],
+                workers: workersOnSource,
+                distance: creep.pos.getRangeTo(container)
+            });
         }
-
         
-
+        if (candidates.length === 0) {
+            return null; // Aucune source disponible
+        }
+        
+        // Trier par : moins de workers > plus d'énergie > plus proche
+        candidates.sort((a, b) => {
+            if (a.workers !== b.workers) return a.workers - b.workers;
+            if (Math.abs(a.energy - b.energy) > 100) return b.energy - a.energy;
+            return a.distance - b.distance;
+        });
+        
+        return candidates[0].container;
+    },
+    
+    /**
+     * Assigne une tâche de construction
+     */
+    assignBuildTask: function(creep) {
+        let target = ConstructionManager.findPriorityConstructionSite(creep.room, creep);
+        if (!target) return false;
+        
+        creep.memory.currentTask = TASKS.BUILD;
+        creep.memory.taskTarget = target.id;
+        return true;
+    },
+    
+    /**
+     * Assigne une tâche de réparation
+     */
+    assignRepairTask: function(creep) {
+        let target = RepairManager.findRepairTarget(creep.room, creep);
+        if (!target) return false;
+        
+        creep.memory.currentTask = TASKS.REPAIR;
+        creep.memory.taskTarget = target.id;
+        return true;
+    },
+    
+    /**
+     * Assigne une tâche d'upgrade
+     */
+    assignUpgradeTask: function(creep) {
+        creep.memory.currentTask = TASKS.UPGRADE;
+        creep.memory.taskTarget = creep.room.controller.id;
+        return true;
+    },
+    
+    /**
+     * 🔧 FIX : Assigne une tâche de transfer INTELLIGENTE
+     */
+    assignTransferTask: function(creep) {
+        // Priorité 1 : Spawn et Extensions
+        let target = creep.pos.findClosestByPath(FIND_MY_STRUCTURES, {
+            filter: s => (
+                s.structureType === STRUCTURE_SPAWN ||
+                s.structureType === STRUCTURE_EXTENSION
+            ) && s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+        });
+        
+        // Priorité 2 : Towers (si < 50% énergie)
+        if (!target) {
+            target = creep.pos.findClosestByPath(FIND_MY_STRUCTURES, {
+                filter: s => s.structureType === STRUCTURE_TOWER &&
+                           s.store[RESOURCE_ENERGY] < s.store.getCapacity(RESOURCE_ENERGY) * 0.5
+            });
+        }
+        
+        // Priorité 3 : Storage (dernier recours)
+        if (!target && creep.room.storage) {
+            target = creep.room.storage;
+        }
+        
+        if (!target) return false;
+        
+        creep.memory.currentTask = TASKS.TRANSFER;
+        creep.memory.taskTarget = target.id;
+        return true;
+    },
+    
+    /**
+     * Exécute la tâche actuelle
+     */
+    executeTask: function(creep) {
+        switch(creep.memory.currentTask) {
+            case TASKS.HARVEST:
+                this.doHarvest(creep);
+                break;
+            case TASKS.BUILD:
+                this.doBuild(creep);
+                break;
+            case TASKS.REPAIR:
+                this.doRepair(creep);
+                break;
+            case TASKS.UPGRADE:
+                this.doUpgrade(creep);
+                break;
+            case TASKS.TRANSFER:
+                this.doTransfer(creep);
+                break;
+            default:
+                this.assignBestTask(creep);
+        }
+    },
+    
+    /**
+     * 🔧 FIX : Exécution de la récolte
+     */
+    doHarvest: function(creep) {
+        // Essayer de récupérer depuis le container assigné
+        if (creep.memory.harvestSourceId) {
+            let container = Game.getObjectById(creep.memory.harvestSourceId);
+            if (container && container.store[RESOURCE_ENERGY] > 0) {
+                if (creep.withdraw(container, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+                    creep.moveTo(container, {reusePath: 20});
+                }
+                return;
+            }
+        }
+        
+        // Fallback : utiliser la méthode standard
+        let useSource = CONFIG.shouldUseSourcesDirectly(creep, creep.room);
+        creep.getEnergy(true, useSource);
+    },
+    
+    /**
+     * Exécution : Construction
+     */
+    doBuild: function(creep) {
+        let target = Game.getObjectById(creep.memory.taskTarget);
+        if (!target) {
+            creep.memory.currentTask = null;
+            return;
+        }
+        
+        if (creep.build(target) === ERR_NOT_IN_RANGE) {
+            creep.moveTo(target, {reusePath: 15});
+        }
+    },
+    
+    /**
+     * Exécution : Réparation
+     */
+    doRepair: function(creep) {
+        let target = Game.getObjectById(creep.memory.taskTarget);
+        if (!target || target.hits >= target.hitsMax) {
+            creep.memory.currentTask = null;
+            return;
+        }
+        
+        if (creep.repair(target) === ERR_NOT_IN_RANGE) {
+            creep.moveTo(target, {reusePath: 15});
+        }
+    },
+    
+    /**
+     * Exécution : Upgrade
+     */
+    doUpgrade: function(creep) {
+        let controller = creep.room.controller;
+        if (creep.upgradeController(controller) === ERR_NOT_IN_RANGE) {
+            creep.moveTo(controller, {reusePath: 20});
+        }
+    },
+    
+    /**
+     * Exécution : Transfer
+     */
+    doTransfer: function(creep) {
+        let target = Game.getObjectById(creep.memory.taskTarget);
+        if (!target || !CONFIG.hasSpaceForEnergy(target)) {
+            creep.memory.currentTask = null;
+            return;
+        }
+        
+        if (creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+            creep.moveTo(target, {reusePath: 15});
+        }
+    },
+    
+    /**
+     * Vérifie si une tâche est terminée
+     */
+    isTaskComplete: function(creep) {
+        let task = creep.memory.currentTask;
+        
+        // Harvest terminé si plein
+        if (task === TASKS.HARVEST) {
+            return creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0;
+        }
+        
+        // Autres tâches terminées si vide
+        if (creep.store[RESOURCE_ENERGY] === 0) {
+            return true;
+        }
+        
+        let target = Game.getObjectById(creep.memory.taskTarget);
+        if (!target) return true;
+        
+        // Build terminé si construction finie
+        if (task === TASKS.BUILD && target.progress >= target.progressTotal) {
+            return true;
+        }
+        
+        // Repair terminé si HP max
+        if (task === TASKS.REPAIR && target.hits >= target.hitsMax) {
+            return true;
+        }
+        
+        // Transfer terminé si target pleine
+        if (task === TASKS.TRANSFER && !CONFIG.hasSpaceForEnergy(target)) {
+            return true;
+        }
+        
+        return false;
+    },
+    
+    /**
+     * Emoji pour affichage visuel
+     */
+    getTaskEmoji: function(task) {
+        const EMOJIS = {
+            [TASKS.HARVEST]: '⛏️',
+            [TASKS.BUILD]: '🔨',
+            [TASKS.REPAIR]: '🔧',
+            [TASKS.UPGRADE]: '⚡',
+            [TASKS.TRANSFER]: '📦'
+        };
+        return EMOJIS[task] || '❓';
+    },
+    
+    /**
+     * Statistiques pour le rapport
+     */
+    getTaskStats: function(room) {
+        let stats = {
+            harvest: 0,
+            build: 0,
+            repair: 0,
+            upgrade: 0,
+            transfer: 0,
+            idle: 0
+        };
+        
+        for (let name in Game.creeps) {
+            let creep = Game.creeps[name];
+            if (creep.room.name !== room.name) continue;
+            if (['miner', 'lorry', 'longDistanceHarvester'].includes(creep.memory.role)) continue;
+            
+            let task = creep.memory.currentTask;
+            if (task && stats[task] !== undefined) {
+                stats[task]++;
+            } else {
+                stats.idle++;
+            }
+        }
+        
         return stats;
-
     }
-
 };
