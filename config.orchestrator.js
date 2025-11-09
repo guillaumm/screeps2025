@@ -43,25 +43,35 @@ module.exports = {
     
     // ========== CONFIGURATION DES TASKS ==========
     
+
     TASK_CONFIG: {
-        // Seuil d'énergie critique (spawn/ext vides)
-        criticalEnergyThreshold: 0.3,
-        
-        // Seuil pour prioriser le transfer
-        transferPriorityThreshold: 0.8,
-        
-        // Forcer au moins N creeps à upgrade en permanence
-        minUpgradersAlways: 1,
-        
-        // Permettre aux upgraders de faire autre chose si critique
+    // Seuil d'énergie critique (spawn/ext vides)
+    // 🔧 Augmenté à 0.5 pour forcer le remplissage en bootstrap
+        criticalEnergyThreshold: 0.5,  // 50% au lieu de 30%
+    
+    // Seuil pour prioriser le transfer
+    // 🔧 Augmenté à 0.9 pour continuer le transfer plus longtemps
+        transferPriorityThreshold: 0.9,  // 90% au lieu de 80%
+    
+    // Forcer au moins N creeps à upgrade en permanence
+    // 🎯 CLEF : Mettre 0 pour permettre au dernier creep de faire autre chose
+        minUpgradersAlways: 0,  // Au lieu de 1 ou 2
+    
+    // Permettre aux upgraders de faire autre chose si critique
         upgradersCanDoOtherTasks: true,
-        
-        // Afficher les tâches via say()
+    
+    // 🔧 NOUVEAU : Upgrade seulement si controller proche du decay
+        upgradeOnlyWhenNearDecay: true,
+        upgradeDecayThreshold: 5000,  // Ticks restants avant decay
+    
+    // Afficher les tâches via say()
         displayTasksWithSay: true,
-        
-        // Fréquence d'affichage (ticks)
+    
+    // Fréquence d'affichage (ticks)
         sayFrequency: 3
     },
+
+
     
     // ========== COMPORTEMENT DES CREEPS ==========
     

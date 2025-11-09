@@ -95,65 +95,106 @@ module.exports = {
     calculateDynamicPriorities: function(room) {
         let priorities = [];
         
-        // 1️⃣ CRITIQUE : Spawn/Extensions vides (< 30%)
+        // 🔍 Analyse de l'état de la room
         let energyPercent = room.energyAvailable / room.energyCapacityAvailable;
+        let stats = RepairManager.getRepairStats(room);
+        let controllerNearDecay = this.isControllerNearDecay(room);
+        
+        // 1️⃣ CRITIQUE : Spawn/Extensions vides (< seuil critique)
         if (energyPercent < CONFIG.TASK_CONFIG.criticalEnergyThreshold) {
             priorities.push(TASKS.TRANSFER);
         }
         
-        // 2️⃣ URGENT : Structures critiques à réparer
-        let stats = RepairManager.getRepairStats(room);
+        // 2️⃣ URGENT : Controller proche du decay (risque de downgrade)
+        if (controllerNearDecay) {
+            priorities.push(TASKS.UPGRADE);
+        }
+        
+        // 3️⃣ URGENT : Structures critiques à réparer
         if (stats.critical > 0) {
             priorities.push(TASKS.REPAIR);
         }
         
-        // 3️⃣ IMPORTANT : Containers sources en construction
+        // 4️⃣ IMPORTANT : Containers sources en construction
         let missingContainers = ConstructionManager.countMissingSourceContainers(room);
         if (missingContainers > 0) {
             priorities.push(TASKS.BUILD);
         }
         
-        // 4️⃣ NORMAL : Remplir spawn/extensions si < 80%
+        // 5️⃣ NORMAL : Remplir spawn/extensions si < seuil transfer
         if (energyPercent < CONFIG.TASK_CONFIG.transferPriorityThreshold) {
             if (!priorities.includes(TASKS.TRANSFER)) {
                 priorities.push(TASKS.TRANSFER);
             }
         }
         
-        // 5️⃣ Constructions normales
+        // 6️⃣ Constructions normales
         if (ConstructionManager.needsConstruction(room)) {
             if (!priorities.includes(TASKS.BUILD)) {
                 priorities.push(TASKS.BUILD);
             }
         }
         
-        // 6️⃣ Réparations normales
+        // 7️⃣ Réparations normales
         if (stats.damaged > 0) {
             if (!priorities.includes(TASKS.REPAIR)) {
                 priorities.push(TASKS.REPAIR);
             }
         }
         
-        // 7️⃣ Upgrade (toujours en dernier)
-        priorities.push(TASKS.UPGRADE);
+        // 8️⃣ Upgrade (seulement si pas critique ou si controller OK)
+        if (!priorities.includes(TASKS.UPGRADE)) {
+            priorities.push(TASKS.UPGRADE);
+        }
         
-        // 🔧 Garantir un minimum d'upgraders
+        // 🔧 Garantir un minimum d'upgraders (si configuré)
         priorities = this.enforceMinimumUpgraders(room, priorities);
         
         return priorities;
     },
     
     /**
+     * 🆕 Vérifie si le controller est proche du decay
+     */
+    isControllerNearDecay: function(room) {
+        if (!CONFIG.TASK_CONFIG.upgradeOnlyWhenNearDecay) {
+            return false; // Feature désactivée
+        }
+        
+        let controller = room.controller;
+        if (!controller || !controller.my) return false;
+        
+        // RCL 1 n'a pas de downgrade
+        if (controller.level === 1) return false;
+        
+        let threshold = CONFIG.TASK_CONFIG.upgradeDecayThreshold || 5000;
+        return controller.ticksToDowngrade < threshold;
+    },
+    
+    /**
      * 🎯 NOUVEAU : Force au moins N creeps à upgrader en permanence
      */
     enforceMinimumUpgraders: function(room, priorities) {
+        // 🔧 Support des fonctions ET des valeurs fixes
+        let minUpgraders = CONFIG.TASK_CONFIG.minUpgradersAlways;
+        
+        // Si c'est une fonction, l'appeler avec la room
+        if (typeof minUpgraders === 'function') {
+            minUpgraders = minUpgraders(room);
+        }
+        
+        // Si 0 ou undefined, ne rien forcer
+        if (!minUpgraders || minUpgraders === 0) {
+            return priorities;
+        }
+        
         let upgraders = _.filter(Game.creeps, c => 
             c.room.name === room.name && 
             c.memory.currentTask === TASKS.UPGRADE &&
             c.store[RESOURCE_ENERGY] > 0
         ).length;
         
-        if (upgraders < CONFIG.TASK_CONFIG.minUpgradersAlways) {
+        if (upgraders < minUpgraders) {
             // Forcer upgrade en priorité
             priorities = [TASKS.UPGRADE, ...priorities.filter(t => t !== TASKS.UPGRADE)];
         }
