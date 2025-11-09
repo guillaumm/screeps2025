@@ -1,6 +1,7 @@
 /*
-Configuration centralisée de l'orchestrateur v4
-NOUVEAU : Politiques stratégiques + Gestion stricte sources/containers
+Configuration centralisée de l'orchestrateur v4 - NETTOYÉE
+🔧 Suppression des rôles obsolètes (harvester, builder, repairer, upgrader)
+✅ Seuls les rôles actifs restent: worker, miner, lorry, longDistanceHarvester
 */
 
 module.exports = {
@@ -12,43 +13,31 @@ module.exports = {
     // ========== QUOTAS DE CREEPS PAR PHASE ==========
     
     BOOTSTRAP: {
-        harvesters: 2,
-        builders: 2,
-        upgraders: 2,
+        workers: 4,  // 🔧 Workers polyvalents remplacent harvesters/builders/upgraders
         miners: 'auto',
         lorries: 0,
-        repairers: 0,
         longDistanceHarvesters: 0
     },
     
     CONSTRUCTION: {
-        harvesters: 0,  // Plus de harvesters dès qu'on a des miners
-        builders: 3,
-        upgraders: 2,
+        workers: 6,  // 🔧 Plus de workers en construction
         miners: 'auto',
         lorries: 'auto',
-        repairers: 1,
         longDistanceHarvesters: 0
     },
     
     PRODUCTION: {
-        harvesters: 0,
-        builders: 1,
-        upgraders: 5,  // Plus d'upgraders en production
+        workers: 8,  // 🔧 Encore plus en production
         miners: 'auto',
         lorries: 'auto',
-        repairers: 2,
         longDistanceHarvesters: 0
     },
     
-    // ========== 🎯 NOUVEAU : POLITIQUES STRATÉGIQUES ==========
+    // ========== 🎯 POLITIQUES STRATÉGIQUES ==========
     
     POLICIES: {
-        // Politique actuelle (peut être changée dynamiquement)
-        // Options : 'BALANCED', 'UPGRADE_FOCUSED', 'BUILD_FOCUSED', 'DEFENSE_FOCUSED'
         current: 'BALANCED',
         
-        // Définition des politiques
         BALANCED: {
             name: 'Équilibrée',
             description: 'Balance entre upgrade, construction et réparations',
@@ -56,10 +45,9 @@ module.exports = {
                 upgrade: 1.0,
                 build: 1.0,
                 repair: 1.0,
-                transfer: 1.2  // Légère priorité au remplissage
+                transfer: 1.2
             },
-            minUpgradersRatio: 0.3,  // Au moins 30% des workers en upgrade
-            allowUpgradersToHelp: true
+            minUpgradersRatio: 0.3
         },
         
         UPGRADE_FOCUSED: {
@@ -71,8 +59,7 @@ module.exports = {
                 repair: 0.7,
                 transfer: 1.0
             },
-            minUpgradersRatio: 0.6,  // 60% en upgrade minimum
-            allowUpgradersToHelp: false  // Upgraders dédiés
+            minUpgradersRatio: 0.6
         },
         
         BUILD_FOCUSED: {
@@ -84,115 +71,29 @@ module.exports = {
                 repair: 1.0,
                 transfer: 1.0
             },
-            minUpgradersRatio: 0.2,  // 20% en upgrade minimum
-            allowUpgradersToHelp: true
-        },
-        
-        DEFENSE_FOCUSED: {
-            name: 'Focus Défense',
-            description: 'Priorité aux réparations et tours',
-            priorityModifiers: {
-                upgrade: 0.5,
-                build: 0.7,
-                repair: 2.0,
-                transfer: 1.5  // Remplir les tours
-            },
-            minUpgradersRatio: 0.1,
-            allowUpgradersToHelp: true
+            minUpgradersRatio: 0.2
         }
     },
     
     // ========== CONFIGURATION DES TASKS ==========
     
     TASK_CONFIG: {
-        // Seuils d'énergie
-        criticalEnergyThreshold: 0.3,
-        transferPriorityThreshold: 0.8,
+        criticalEnergyThreshold: 0.5,  // 🔧 Remonté à 50%
         
-        // 🔧 NOUVEAU : Gestion stricte des sources
-        strictSourceControl: true,  // Empêcher harvest si miner présent
-        allowHarvestWithoutMiner: true,  // Autoriser harvest si pas de miner
-        
-        // 📍 NOUVEAU : Optimisation géographique
-        minEnergyToStartWork: 0.3,  // 30% minimum pour commencer une tâche productive
-        useEnergyRelays: true,  // Utiliser les structures comme relais
-        maxRelayDetour: 2.0,  // Facteur max de détour pour un relais (2x = acceptable)
-        nearbyTaskRange: 10,  // Range pour chercher des tâches proches
-        geographicBonusEnabled: true,  // Bonus pour tâches proches
-        
-        // Upgrade
-        minUpgradersAlways: 0,
-        upgradersCanDoOtherTasks: true,
-        upgradeOnlyWhenNearDecay: false,
-        upgradeDecayThreshold: 5000,
+        // Gestion stricte des sources
+        strictSourceControl: true,
+        allowHarvestWithoutMiner: true,
         
         // Affichage
         displayTasksWithSay: true,
         sayFrequency: 3
     },
     
-    // ========== COMPORTEMENT DES CREEPS ==========
-    
-    CREEP_BEHAVIOR: {
-        // 🔧 MODIFIÉ : Plus de harvest direct si miners présents
-        workersUseSourcesWhenNoMiners: true,  // Seulement si AUCUN miner
-        harvestersAlwaysUseSources: false,    // Même les harvesters respectent les miners
-        
-        upgradersUseDedicatedLink: true,
-        upgraderLinkIndex: 1,
-        lorriesDepositToLinks: false,
-        lorriesPickupDroppedEnergy: true,
-        lorriesLootTombstones: true,
-        lorryMinContainerEnergy: 100
-    },
-    
     // ========== COMPORTEMENT DES LORRIES ==========
     
     LORRY_BEHAVIOR: {
-        prioritizeSpawnExtension: true,
         minEnergyToDeposit: 50,
-        preferClosestTarget: true,
-        returnToStorageWhenFull: true,
-        maxTargetDistance: null
-    },
-    
-    // ========== COMPORTEMENT DES HARVESTERS ==========
-    
-    HARVESTER_BEHAVIOR: {
-        maxHarvesters: 2,  // Réduit car on préfère les miners
-        minimalBodySize: 200,
-        alwaysSpawnOneInBootstrap: true,
-        useStorageAsLastResort: true
-    },
-    
-    // ========== COMPORTEMENT DES BUILDERS ==========
-    
-    BUILDER_BEHAVIOR: {
-        repairWhenNoConstruction: true,
-        helpUpgradeWhenIdle: true,
-        maxWallRepairHits: 50000,
-        maxConstructionSiteDistance: null
-    },
-    
-    // ========== COMPORTEMENT DES UPGRADERS ==========
-    
-    UPGRADER_BEHAVIOR: {
-        minEnergyToUpgrade: 0,
-        maxDistanceFromController: 3,
-        upgradeMoreWhenStorageFull: true,
-        storageFullThreshold: 0.8,
-        storageFullUpgraderMultiplier: 1.5
-    },
-    
-    // ========== COMPORTEMENT DES TOURS ==========
-    
-    TOWER_BEHAVIOR: {
-        repairOnlyWithMiners: true,
-        minEnergyPercentToRepair: 0.5,
-        attackEvenWhenLowEnergy: true,
-        minEnergyToAttack: 0,
-        repairWalls: false,
-        minWallHitsToRepair: 10000
+        preferClosestTarget: true
     },
     
     // ========== MINERS ==========
@@ -210,11 +111,8 @@ module.exports = {
     
     REPAIR_CONFIG: {
         criticalThreshold: 0.25,
-        damagedThreshold: 0.75,
-        maxWallHits: 50000,
-        buildersAutoRepair: true,
-        progressiveWallRepair: false,
-        wallHitsPerRCL: 10000
+        damagedThreshold: 0.8,  // 🔧 Plus haut = répare plus tôt
+        maxWallHits: 50000
     },
     
     // ========== CONFIGURATION DES CORPS ==========
@@ -226,60 +124,11 @@ module.exports = {
         ldh: 1.0
     },
     
-    // ========== PRIORITÉS DE SPAWN ==========
-    
-    SPAWN_PRIORITY: {
-        miners: 1,       // Miners en premier !
-        lorries: 2,      // Puis lorries
-        upgraders: 3,
-        builders: 4,
-        harvesters: 5,
-        repairers: 6,
-        longDistanceHarvesters: 7
-    },
-    
-    // ========== COMPORTEMENT DU SPAWN ==========
-    
-    SPAWN_BEHAVIOR: {
-        allowEmergencySpawn: true,
-        emergencyEnergyThreshold: 300,
-        preferLargeCreeps: true,
-        maxCreepsPerSpawn: 50,
-        verboseSpawnLogs: true
-    },
-    
-    // ========== GESTION DES LINKS ==========
-    
-    LINK_BEHAVIOR: {
-        autoTransferToUpgrader: true,
-        autoTransferToStorage: true,
-        minEnergyToTransfer: 400,
-        sourceLinksIndexes: [2],
-        targetLinksIndexes: [0, 1],
-        transferCooldown: 0
-    },
-    
-    // ========== DÉFENSE ==========
-    
-    DEFENSIVE_BEHAVIOR: {
-        towersAttackFirst: true,
-        safeMode: {
-            autoActivate: false,
-            minHostiles: 3,
-            minHostileDamage: 1000
-        },
-        spawnDefendersOnAttack: false,
-        defendersPerHostile: 0.5
-    },
-    
     // ========== CONFIGURATION DES CONSTRUCTIONS ==========
     
     CONSTRUCTION_CONFIG: {
         sourceContainerMaxRange: 1,
         minBuildersForSourceContainers: 2,
-        buildersPrioritizeSourceContainers: true,
-        boostBuildersForSourceContainers: true,
-        pauseOtherConstructionsDuringSourceContainers: false,
         autoPlaceSourceContainers: true,
         autoPlaceInterval: 10
     },
@@ -287,19 +136,8 @@ module.exports = {
     // ========== ÉCONOMIE ==========
     
     ENERGY_CONFIG: {
-        minPercentForSpawn: {
-            BOOTSTRAP: 0.0,
-            CONSTRUCTION: 0.3,
-            PRODUCTION: 0.5
-        },
         useMaxEnergyInProduction: true,
-        minContainerEnergy: 100,
-        reserveEnergy: {
-            BOOTSTRAP: 0,
-            CONSTRUCTION: 500,
-            PRODUCTION: 1000
-        },
-        storageDistributionPolicy: "balanced"
+        minContainerEnergy: 100
     },
     
     // ========== RAPPORT ==========
@@ -308,7 +146,6 @@ module.exports = {
     
     // ========== OPTIONS AVANCÉES ==========
     
-    USE_MANUAL_SPAWN: true,
     DEBUG_MODE: false,
     
     // ========== MÉTHODES HELPER ==========
@@ -321,12 +158,6 @@ module.exports = {
         return Math.max(1, Math.ceil(minerCount * 1.0));
     },
     
-    hasEnoughEnergyToSpawn: function(room, phase) {
-        let energyPercent = room.energyAvailable / room.energyCapacityAvailable;
-        let threshold = this.ENERGY_CONFIG.minPercentForSpawn[phase] || 0.5;
-        return energyPercent >= threshold;
-    },
-    
     hasEnoughMiners: function(room) {
         const MinerManager = require('module.minerManager');
         let minerCount = MinerManager.getMinerCount(room);
@@ -334,13 +165,11 @@ module.exports = {
         return minerCount >= requiredMiners;
     },
     
-    // 🎯 NOUVEAU : Récupère la politique active
     getActivePolicy: function() {
         let policyName = this.POLICIES.current;
         return this.POLICIES[policyName] || this.POLICIES.BALANCED;
     },
     
-    // 🎯 NOUVEAU : Change la politique (utilisable en console)
     setPolicy: function(policyName) {
         if (this.POLICIES[policyName]) {
             this.POLICIES.current = policyName;
@@ -353,13 +182,11 @@ module.exports = {
         return false;
     },
     
-    // 🔧 NOUVEAU : Vérifie si une source est "réservée" par un miner
     isSourceReservedByMiner: function(sourceId) {
         if (!this.TASK_CONFIG.strictSourceControl) {
             return false;
         }
         
-        // Chercher si un miner est assigné à cette source
         let miner = _.find(Game.creeps, c => 
             c.memory.role === 'miner' && 
             c.memory.sourceId === sourceId
@@ -368,7 +195,6 @@ module.exports = {
         return miner !== undefined;
     },
     
-    // 🔧 NOUVEAU : Liste les sources disponibles pour harvest direct
     getAvailableSourcesForHarvest: function(room) {
         if (!this.TASK_CONFIG.strictSourceControl) {
             return room.find(FIND_SOURCES);
@@ -384,77 +210,6 @@ module.exports = {
         }
         
         return available;
-    },
-    
-    getUpgraderLink: function(room) {
-        if (!this.CREEP_BEHAVIOR.upgradersUseDedicatedLink) {
-            return null;
-        }
-        
-        let linkList = _.filter(Game.structures, s => 
-            s.structureType == STRUCTURE_LINK && 
-            s.room.name == room.name
-        );
-        
-        let index = this.CREEP_BEHAVIOR.upgraderLinkIndex;
-        if (index !== null && linkList.length > index) {
-            return linkList[index];
-        }
-        
-        return null;
-    },
-    
-    shouldUseSourcesDirectly: function(creep, room) {
-        // Si contrôle strict, vérifier les miners
-        if (this.TASK_CONFIG.strictSourceControl) {
-            // Seulement si AUCUN miner et autorisé
-            if (this.TASK_CONFIG.allowHarvestWithoutMiner && 
-                !this.hasEnoughMiners(room)) {
-                return true;
-            }
-            return false;
-        }
-        
-        // Ancien comportement (fallback)
-        if (creep.memory.role == 'harvester' && 
-            this.CREEP_BEHAVIOR.harvestersAlwaysUseSources) {
-            return true;
-        }
-        
-        if (this.CREEP_BEHAVIOR.workersUseSourcesWhenNoMiners && 
-            !this.hasEnoughMiners(room)) {
-            return true;
-        }
-        
-        return false;
-    },
-    
-    shouldTowerRepair: function(tower) {
-        let energyPercent = tower.store[RESOURCE_ENERGY] / tower.store.getCapacity(RESOURCE_ENERGY);
-        if (energyPercent < this.TOWER_BEHAVIOR.minEnergyPercentToRepair) {
-            return false;
-        }
-        
-        if (this.TOWER_BEHAVIOR.repairOnlyWithMiners) {
-            return this.hasEnoughMiners(tower.room);
-        }
-        
-        return true;
-    },
-    
-    getLorryDepositTargets: function() {
-        let targets = [
-            STRUCTURE_SPAWN,
-            STRUCTURE_EXTENSION,
-            STRUCTURE_STORAGE,
-            STRUCTURE_TOWER
-        ];
-        
-        if (this.CREEP_BEHAVIOR.lorriesDepositToLinks) {
-            targets.push(STRUCTURE_LINK);
-        }
-        
-        return targets;
     },
     
     hasSpaceForEnergy: function(structure) {
@@ -482,12 +237,5 @@ module.exports = {
         }
         
         return 0;
-    },
-    
-    isStorageFull: function(room) {
-        if (!room.storage) return false;
-        
-        let percent = this.getEnergyPercent(room.storage);
-        return percent >= this.UPGRADER_BEHAVIOR.storageFullThreshold;
     }
 };

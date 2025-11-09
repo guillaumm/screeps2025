@@ -1,30 +1,26 @@
-// prototype.tower - Version refactorée avec configuration centralisée
+// prototype.tower - Version simplifiée
 
-const CONFIG = require('config.orchestrator');
+const RepairManager = require('module.repairManager');
 
-// Créer une fonction pour StructureTower
 StructureTower.prototype.defend = function() {
     
-    // Chercher un creep hostile proche
+    // 1. PRIORITÉ ABSOLUE: Défense
     let target = this.pos.findClosestByRange(FIND_HOSTILE_CREEPS);
     
-    // Si un ennemi est trouvé...
     if (target != undefined) {
-        // ...FIRE!
         this.attack(target);
+        return;
     }
-    else {
-        // Pas d'ennemi : vérifier si on doit réparer
-        if (CONFIG.shouldTowerRepair(this)) {
-            
-            // Chercher une structure endommagée
-            let damagedStructure = this.pos.findClosestByPath(FIND_STRUCTURES, {
-                filter: (s) => s.hits && s.hitsMax && s.hits < s.hitsMax
-            });
-            
-            if (damagedStructure != undefined) {
-                this.repair(damagedStructure);
-            }
+    
+    // 2. Réparations (si >50% d'énergie)
+    let energyPercent = this.store[RESOURCE_ENERGY] / this.store.getCapacity(RESOURCE_ENERGY);
+    
+    if (energyPercent > 0.5) {
+        // Chercher structures critiques ou endommagées
+        let target = RepairManager.findRepairTarget(this.room);
+        
+        if (target) {
+            this.repair(target);
         }
     }
 };
