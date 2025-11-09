@@ -1,6 +1,7 @@
 /*
-Task Manager v3 - SEUILS D'ÉNERGIE CORRIGÉS
-🔧 Fix: Seuils plus bas pour que les workers travaillent plus
+Task Manager - UPGRADE EN PERMANENCE
+🎯 Workers actifs dès qu'ils ont de l'énergie
+⚡ Upgrade par défaut si pas d'autre priorité
 */
 
 const CONFIG = require('config.orchestrator');
@@ -25,21 +26,21 @@ module.exports = {
             creep.say(emoji);
         }
         
-        // 🔧 FIX: Seuils beaucoup plus bas
-        let energyPercent = creep.store[RESOURCE_ENERGY] / creep.store.getCapacity(RESOURCE_ENERGY);
+        let currentEnergy = creep.store[RESOURCE_ENERGY];
+        let maxEnergy = creep.store.getCapacity(RESOURCE_ENERGY);
         
-        // Si VRAIMENT vide → forcer harvest
-        if (energyPercent === 0 && creep.memory.currentTask !== TASKS.HARVEST) {
+        // 🔧 LOGIQUE SIMPLIFIÉE: Vide = harvest, Sinon = travail
+        if (currentEnergy === 0 && creep.memory.currentTask !== TASKS.HARVEST) {
             creep.memory.currentTask = TASKS.HARVEST;
             creep.memory.taskTarget = null;
         }
-        // Si assez d'énergie (> 10%) et en harvest → chercher une tâche productive
-        else if (energyPercent > 0.1 && creep.memory.currentTask === TASKS.HARVEST) {
+        else if (currentEnergy > 0 && creep.memory.currentTask === TASKS.HARVEST) {
+            // Dès qu'on a de l'énergie, on travaille
             creep.memory.currentTask = null;
             creep.memory.taskTarget = null;
         }
         
-        // Si pas de tâche ou tâche terminée, en trouver une
+        // Si pas de tâche ou tâche terminée, en assigner une
         if (!creep.memory.currentTask || this.isTaskComplete(creep)) {
             this.assignBestTask(creep);
         }
@@ -50,23 +51,49 @@ module.exports = {
     
     assignBestTask: function(creep) {
         let room = creep.room;
-        let energyPercent = creep.store[RESOURCE_ENERGY] / creep.store.getCapacity(RESOURCE_ENERGY);
+        let currentEnergy = creep.store[RESOURCE_ENERGY];
         
-        // 🔧 FIX: Seulement si VIDE
-        if (energyPercent === 0) {
+        // Si vide → harvest
+        if (currentEnergy === 0) {
             return this.assignHarvestTask(creep);
         }
         
-        // 📊 Analyser la situation de la room
+        // 📊 Analyser la situation
         let situation = this.analyzeRoomSituation(room);
-        
-        // Récupérer la politique active
         let policy = CONFIG.getActivePolicy();
         
-        // Calculer les priorités
-        let priorities = this.calculateSmartPriorities(room, situation, policy, creep);
+        // 🔴 CAS SPÉCIAL: Seul creep vivant
+        let totalCreeps = _.filter(Game.creeps, c => c.room.name === room.name).length;
+        if (totalCreeps === 1) {
+            // Le seul creep doit maintenir l'énergie du spawn
+            if (situation.energyPercent < 0.5) {
+                if (this.assignTransferTask(creep, situation)) return;
+            }
+            // Sinon upgrade
+            return this.assignUpgradeTask(creep, situation);
+        }
         
-        // Essayer chaque tâche par ordre de priorité
+        // 🔴 PRIORITÉS ABSOLUES
+        
+        // 1. Spawn/Extensions critiques (< 30%)
+        if (situation.energyPercent < CONFIG.TASK_CONFIG.criticalEnergyThreshold) {
+            if (this.assignTransferTask(creep, situation)) return;
+        }
+        
+        // 2. Structures critiques (< 30% HP)
+        if (situation.repairStats.critical > 0) {
+            if (this.assignRepairTask(creep, situation)) return;
+        }
+        
+        // 3. Containers sources manquants
+        if (situation.missingContainers > 0) {
+            if (this.assignBuildTask(creep, situation)) return;
+        }
+        
+        // 🟡 PRIORITÉS NORMALES (basées sur politique)
+        
+        let priorities = this.calculatePriorities(situation, policy);
+        
         for (let taskType of priorities) {
             let assigned = false;
             
@@ -88,7 +115,7 @@ module.exports = {
             if (assigned) return;
         }
         
-        // Fallback : upgrade (toujours possible)
+        // 🎯 FALLBACK GARANTI: UPGRADE (toujours possible)
         this.assignUpgradeTask(creep, situation);
     },
     
@@ -101,55 +128,31 @@ module.exports = {
             missingContainers: ConstructionManager.countMissingSourceContainers(room),
             constructionSites: room.find(FIND_CONSTRUCTION_SITES).length,
             
-            controllerNearDecay: this.isControllerNearDecay(room),
             workerStats: this.getWorkerDistribution(room),
             
             needsTransfer: false,
             transferUrgency: 0
         };
         
-        // Calculer le besoin de transfer
+        // Calculer urgence transfer
         let emptyStructures = room.find(FIND_MY_STRUCTURES, {
             filter: s => (s.structureType === STRUCTURE_SPAWN || 
                          s.structureType === STRUCTURE_EXTENSION) &&
                          CONFIG.hasSpaceForEnergy(s)
         }).length;
         
+        let totalStructures = room.find(FIND_MY_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_SPAWN || 
+                        s.structureType === STRUCTURE_EXTENSION
+        }).length;
+        
         situation.needsTransfer = emptyStructures > 0;
-        situation.transferUrgency = emptyStructures / Math.max(1, room.find(FIND_MY_STRUCTURES, {
-            filter: s => s.structureType === STRUCTURE_SPAWN || s.structureType === STRUCTURE_EXTENSION
-        }).length);
+        situation.transferUrgency = emptyStructures / Math.max(1, totalStructures);
         
         return situation;
     },
     
-    calculateSmartPriorities: function(room, situation, policy, creep) {
-        let priorities = [];
-        
-        // 🔴 PRIORITÉS ABSOLUES
-        
-        // 1. Spawn/Extensions critiques (< 50%)
-        if (situation.energyPercent < 0.5) {
-            priorities.push(TASKS.TRANSFER);
-        }
-        
-        // 2. Controller decay imminent
-        if (situation.controllerNearDecay) {
-            priorities.push(TASKS.UPGRADE);
-        }
-        
-        // 3. Structures critiques
-        if (situation.repairStats.critical > 0) {
-            priorities.push(TASKS.REPAIR);
-        }
-        
-        // 4. Containers sources (vital)
-        if (situation.missingContainers > 0) {
-            priorities.push(TASKS.BUILD);
-        }
-        
-        // 🟡 PRIORITÉS NORMALES
-        
+    calculatePriorities: function(situation, policy) {
         let taskScores = {
             [TASKS.TRANSFER]: 0,
             [TASKS.BUILD]: 0,
@@ -157,54 +160,42 @@ module.exports = {
             [TASKS.UPGRADE]: 0
         };
         
-        // Transfer : basé sur l'urgence
+        // Transfer
         if (situation.needsTransfer) {
             taskScores[TASKS.TRANSFER] = 10 * situation.transferUrgency;
         }
         
-        // Build : selon nombre de sites
+        // Build
         if (situation.constructionSites > 0) {
-            taskScores[TASKS.BUILD] = 8 + Math.min(5, situation.constructionSites);
-            
-            if (situation.missingContainers > 0) {
-                taskScores[TASKS.BUILD] += 10;
-            }
+            taskScores[TASKS.BUILD] = 5 + Math.min(10, situation.constructionSites * 2);
         }
         
-        // 🔧 FIX: Repair même si peu de dégâts
-        if (situation.repairStats.damaged > 0 || situation.repairStats.critical > 0) {
-            taskScores[TASKS.REPAIR] = 6 + situation.repairStats.damaged + (situation.repairStats.critical * 2);
+        // Repair
+        if (situation.repairStats.damaged > 0) {
+            taskScores[TASKS.REPAIR] = 5 + situation.repairStats.damaged;
         }
         
-        // 🔧 FIX: Upgrade TOUJOURS possible avec score de base plus élevé
-        taskScores[TASKS.UPGRADE] = 8;
+        // 🎯 UPGRADE: Score de base ÉLEVÉ
+        taskScores[TASKS.UPGRADE] = 10;
         
-        // BONUS : Storage plein → upgrade plus
+        // BONUS: Storage plein → upgrade encore plus
         if (situation.storageEnergy > 50000) {
-            taskScores[TASKS.UPGRADE] += 5;
+            taskScores[TASKS.UPGRADE] += 10;
         }
         
-        // Appliquer les modificateurs de politique
-        taskScores[TASKS.TRANSFER] *= (policy.priorityModifiers.transfer || 1.0);
-        taskScores[TASKS.BUILD] *= (policy.priorityModifiers.build || 1.0);
-        taskScores[TASKS.REPAIR] *= (policy.priorityModifiers.repair || 1.0);
-        taskScores[TASKS.UPGRADE] *= (policy.priorityModifiers.upgrade || 1.0);
+        // Appliquer modificateurs de politique
+        for (let task in taskScores) {
+            let modifier = policy.priorityModifiers[task] || 1.0;
+            taskScores[task] *= modifier;
+        }
         
-        // Trier par score
+        // Trier par score décroissant
         let sortedTasks = Object.entries(taskScores)
             .sort((a, b) => b[1] - a[1])
             .map(entry => entry[0]);
         
-        for (let task of sortedTasks) {
-            if (!priorities.includes(task)) {
-                priorities.push(task);
-            }
-        }
-        
         // Forcer ratio minimum d'upgraders
-        priorities = this.enforceMinimumUpgraders(room, priorities, policy);
-        
-        return priorities;
+        return this.enforceMinimumUpgraders(situation, sortedTasks, policy);
     },
     
     getWorkerDistribution: function(room) {
@@ -232,34 +223,27 @@ module.exports = {
         return stats;
     },
     
-    enforceMinimumUpgraders: function(room, priorities, policy) {
-        let totalWorkers = _.filter(Game.creeps, c => 
-            c.room.name === room.name && 
-            !['miner', 'lorry', 'longDistanceHarvester'].includes(c.memory.role) &&
-            c.store[RESOURCE_ENERGY] > 0
-        ).length;
-        
+    enforceMinimumUpgraders: function(situation, priorities, policy) {
+        let totalWorkers = situation.workerStats.total;
         if (totalWorkers === 0) return priorities;
         
-        let currentUpgraders = _.filter(Game.creeps, c => 
-            c.room.name === room.name && 
-            c.memory.currentTask === TASKS.UPGRADE &&
-            c.store[RESOURCE_ENERGY] > 0
-        ).length;
-        
+        let currentUpgraders = situation.workerStats.upgrade;
         let requiredUpgraders = Math.ceil(totalWorkers * policy.minUpgradersRatio);
         
         if (currentUpgraders < requiredUpgraders) {
+            // Mettre upgrade en premier
             priorities = [TASKS.UPGRADE, ...priorities.filter(t => t !== TASKS.UPGRADE)];
         }
         
         return priorities;
     },
     
+    // ========== ASSIGNATION DES TÂCHES ==========
+    
     assignHarvestTask: function(creep) {
         creep.memory.currentTask = TASKS.HARVEST;
         
-        // 🔧 FIX: Toujours essayer les containers/energy tombée en priorité
+        // 1. Énergie tombée par terre (priorité absolue)
         let droppedEnergy = creep.pos.findClosestByPath(FIND_DROPPED_RESOURCES, {
             filter: r => r.resourceType == RESOURCE_ENERGY && r.amount > 50
         });
@@ -269,14 +253,25 @@ module.exports = {
             return true;
         }
         
-        let bestContainer = this.findBestHarvestContainer(creep);
-        if (bestContainer) {
-            creep.memory.harvestSourceId = bestContainer.id;
+        // 2. Containers avec énergie
+        let container = creep.pos.findClosestByPath(FIND_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_CONTAINER &&
+                        s.store[RESOURCE_ENERGY] >= CONFIG.MIN_CONTAINER_ENERGY
+        });
+        if (container) {
+            creep.memory.harvestSourceId = container.id;
             creep.memory.harvestMode = 'container';
             return true;
         }
         
-        // Harvest direct autorisé si pas de miners
+        // 3. Storage
+        if (creep.room.storage && creep.room.storage.store[RESOURCE_ENERGY] > 1000) {
+            creep.memory.harvestSourceId = creep.room.storage.id;
+            creep.memory.harvestMode = 'storage';
+            return true;
+        }
+        
+        // 4. Sources (si autorisé)
         let availableSources = CONFIG.getAvailableSourcesForHarvest(creep.room);
         if (availableSources.length > 0) {
             let closestSource = creep.pos.findClosestByPath(availableSources);
@@ -287,21 +282,9 @@ module.exports = {
             }
         }
         
+        // 5. Attendre
         creep.memory.harvestMode = 'waiting';
         return true;
-    },
-    
-    findBestHarvestContainer: function(creep) {
-        let room = creep.room;
-        
-        let containers = room.find(FIND_STRUCTURES, {
-            filter: s => s.structureType === STRUCTURE_CONTAINER &&
-                        s.store[RESOURCE_ENERGY] >= 50
-        });
-        
-        if (containers.length === 0) return null;
-        
-        return creep.pos.findClosestByPath(containers);
     },
     
     assignBuildTask: function(creep, situation) {
@@ -329,15 +312,25 @@ module.exports = {
     },
     
     assignTransferTask: function(creep, situation) {
+        // Priorité: Spawn → Extensions → Tours → Storage
+        
         let targets = creep.room.find(FIND_MY_STRUCTURES, {
             filter: s => (
                 s.structureType === STRUCTURE_SPAWN ||
-                s.structureType === STRUCTURE_EXTENSION ||
-                s.structureType === STRUCTURE_TOWER
+                s.structureType === STRUCTURE_EXTENSION
             ) && CONFIG.hasSpaceForEnergy(s)
         });
         
         if (targets.length === 0) {
+            // Tours
+            targets = creep.room.find(FIND_MY_STRUCTURES, {
+                filter: s => s.structureType === STRUCTURE_TOWER && 
+                            CONFIG.hasSpaceForEnergy(s)
+            });
+        }
+        
+        if (targets.length === 0) {
+            // Storage
             if (creep.room.storage && CONFIG.hasSpaceForEnergy(creep.room.storage)) {
                 creep.memory.currentTask = TASKS.TRANSFER;
                 creep.memory.taskTarget = creep.room.storage.id;
@@ -355,6 +348,8 @@ module.exports = {
         
         return false;
     },
+    
+    // ========== EXÉCUTION DES TÂCHES ==========
     
     executeTask: function(creep) {
         switch(creep.memory.currentTask) {
@@ -386,7 +381,7 @@ module.exports = {
             if (spawn && creep.pos.getRangeTo(spawn) > 3) {
                 creep.moveTo(spawn, {visualizePathStyle: {stroke: '#ffffff'}});
             }
-            if (Game.time % 5 === 0) {
+            if (Game.time % 10 === 0) {
                 creep.memory.currentTask = null;
             }
             return;
@@ -398,27 +393,17 @@ module.exports = {
             return;
         }
         
-        // 🔧 FIX: Support pickup
         if (mode === 'pickup') {
             if (creep.pickup(target) === ERR_NOT_IN_RANGE) {
-                creep.moveTo(target, {
-                    reusePath: 20,
-                    visualizePathStyle: {stroke: '#ffaa00'}
-                });
+                creep.moveTo(target, {visualizePathStyle: {stroke: '#ffaa00'}});
             }
-        } else if (mode === 'container') {
+        } else if (mode === 'container' || mode === 'storage') {
             if (creep.withdraw(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-                creep.moveTo(target, {
-                    reusePath: 20,
-                    visualizePathStyle: {stroke: '#ffaa00'}
-                });
+                creep.moveTo(target, {visualizePathStyle: {stroke: '#ffaa00'}});
             }
-        } else {
+        } else if (mode === 'source') {
             if (creep.harvest(target) === ERR_NOT_IN_RANGE) {
-                creep.moveTo(target, {
-                    reusePath: 20,
-                    visualizePathStyle: {stroke: '#ffaa00'}
-                });
+                creep.moveTo(target, {visualizePathStyle: {stroke: '#ffaa00'}});
             }
         }
     },
@@ -431,10 +416,7 @@ module.exports = {
         }
         
         if (creep.build(target) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(target, {
-                reusePath: 15,
-                visualizePathStyle: {stroke: '#ffffff'}
-            });
+            creep.moveTo(target, {visualizePathStyle: {stroke: '#ffffff'}});
         }
     },
     
@@ -446,20 +428,14 @@ module.exports = {
         }
         
         if (creep.repair(target) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(target, {
-                reusePath: 15,
-                visualizePathStyle: {stroke: '#00ff00'}
-            });
+            creep.moveTo(target, {visualizePathStyle: {stroke: '#00ff00'}});
         }
     },
     
     doUpgrade: function(creep) {
         let controller = creep.room.controller;
         if (creep.upgradeController(controller) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(controller, {
-                reusePath: 20,
-                visualizePathStyle: {stroke: '#ff00ff'}
-            });
+            creep.moveTo(controller, {visualizePathStyle: {stroke: '#ff00ff'}});
         }
     },
     
@@ -471,25 +447,8 @@ module.exports = {
         }
         
         if (creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(target, {
-                reusePath: 15,
-                visualizePathStyle: {stroke: '#0000ff'}
-            });
+            creep.moveTo(target, {visualizePathStyle: {stroke: '#0000ff'}});
         }
-    },
-    
-    isControllerNearDecay: function(room) {
-        if (!CONFIG.TASK_CONFIG.upgradeOnlyWhenNearDecay) {
-            return false;
-        }
-        
-        let controller = room.controller;
-        if (!controller || !controller.my || controller.level === 1) {
-            return false;
-        }
-        
-        let threshold = CONFIG.TASK_CONFIG.upgradeDecayThreshold || 5000;
-        return controller.ticksToDowngrade < threshold;
     },
     
     isTaskComplete: function(creep) {

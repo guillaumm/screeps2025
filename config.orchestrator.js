@@ -1,7 +1,6 @@
 /*
-Configuration centralisée de l'orchestrateur v4 - NETTOYÉE
-🔧 Suppression des rôles obsolètes (harvester, builder, repairer, upgrader)
-✅ Seuls les rôles actifs restent: worker, miner, lorry, longDistanceHarvester
+Configuration centralisée UNIFIÉE - UN SEUL ENDROIT pour chaque réglage
+🎯 Pas de doublons, paramètres cohérents entre modules
 */
 
 module.exports = {
@@ -10,24 +9,32 @@ module.exports = {
     HOME_ROOM: 'W13N57',
     TARGET_ROOM: 'W12N57',
     
+    // ========== ⚙️ PARAMÈTRES CRITIQUES (utilisés partout) ==========
+    
+    // Distance container <-> source (DOIT être identique partout)
+    CONTAINER_SOURCE_DISTANCE: 1,
+    
+    // Seuil minimum d'énergie dans container pour être "utilisable"
+    MIN_CONTAINER_ENERGY: 50,
+    
     // ========== QUOTAS DE CREEPS PAR PHASE ==========
     
     BOOTSTRAP: {
-        workers: 4,  // 🔧 Workers polyvalents remplacent harvesters/builders/upgraders
+        workers: 4,
         miners: 'auto',
         lorries: 0,
         longDistanceHarvesters: 0
     },
     
     CONSTRUCTION: {
-        workers: 6,  // 🔧 Plus de workers en construction
+        workers: 6,
         miners: 'auto',
         lorries: 'auto',
         longDistanceHarvesters: 0
     },
     
     PRODUCTION: {
-        workers: 8,  // 🔧 Encore plus en production
+        workers: 10,  // Plus de workers en production
         miners: 'auto',
         lorries: 'auto',
         longDistanceHarvesters: 0
@@ -36,40 +43,40 @@ module.exports = {
     // ========== 🎯 POLITIQUES STRATÉGIQUES ==========
     
     POLICIES: {
-        current: 'BALANCED',
+        current: 'UPGRADE_FOCUSED',  // 🔧 Par défaut: focus upgrade
         
         BALANCED: {
             name: 'Équilibrée',
             description: 'Balance entre upgrade, construction et réparations',
             priorityModifiers: {
-                upgrade: 1.0,
+                upgrade: 1.2,   // Légèrement favorisé
                 build: 1.0,
-                repair: 1.0,
-                transfer: 1.2
+                repair: 0.8,
+                transfer: 1.5   // Transfer important
             },
-            minUpgradersRatio: 0.3
+            minUpgradersRatio: 0.4  // 40% en upgrade minimum
         },
         
         UPGRADE_FOCUSED: {
             name: 'Focus Upgrade',
             description: 'Maximise la progression du controller',
             priorityModifiers: {
-                upgrade: 2.0,
-                build: 0.5,
-                repair: 0.7,
-                transfer: 1.0
+                upgrade: 3.0,   // 🔧 Très favorisé
+                build: 0.7,
+                repair: 0.5,
+                transfer: 1.5
             },
-            minUpgradersRatio: 0.6
+            minUpgradersRatio: 0.7  // 70% en upgrade
         },
         
         BUILD_FOCUSED: {
             name: 'Focus Construction',
             description: 'Accélère les constructions',
             priorityModifiers: {
-                upgrade: 0.5,
-                build: 2.0,
+                upgrade: 0.8,
+                build: 3.0,
                 repair: 1.0,
-                transfer: 1.0
+                transfer: 1.5
             },
             minUpgradersRatio: 0.2
         }
@@ -78,22 +85,16 @@ module.exports = {
     // ========== CONFIGURATION DES TASKS ==========
     
     TASK_CONFIG: {
-        criticalEnergyThreshold: 0.5,  // 🔧 Remonté à 50%
+        // 🔧 Seuil critique pour spawns/extensions
+        criticalEnergyThreshold: 0.3,  // < 30% = urgent
         
-        // Gestion stricte des sources
+        // Gestion stricte des sources (éviter conflit miner/worker)
         strictSourceControl: true,
         allowHarvestWithoutMiner: true,
         
         // Affichage
         displayTasksWithSay: true,
-        sayFrequency: 3
-    },
-    
-    // ========== COMPORTEMENT DES LORRIES ==========
-    
-    LORRY_BEHAVIOR: {
-        minEnergyToDeposit: 50,
-        preferClosestTarget: true
+        sayFrequency: 5
     },
     
     // ========== MINERS ==========
@@ -101,18 +102,34 @@ module.exports = {
     MINER_CONFIG: {
         minWorkParts: 3,
         maxWorkParts: 20,
-        maxContainerRange: 2,
-        useLinksIfAvailable: true,
-        spawnReplacementBeforeDeath: true,
-        replacementTicksBeforeDeath: 150
+        // 🔧 DOIT correspondre à CONTAINER_SOURCE_DISTANCE
+        maxContainerRange: 1,  // Corrigé de 2 → 1
+        useLinksIfAvailable: true
+    },
+    
+    // ========== LORRIES ==========
+    
+    LORRY_CONFIG: {
+        minEnergyToDeposit: 50,
+        // 🔧 Seuil pour récupérer dans containers
+        minContainerEnergyToWithdraw: 50
     },
     
     // ========== RÉPARATIONS ==========
     
     REPAIR_CONFIG: {
-        criticalThreshold: 0.25,
-        damagedThreshold: 0.8,  // 🔧 Plus haut = répare plus tôt
+        criticalThreshold: 0.3,      // < 30% = critique
+        damagedThreshold: 0.85,      // < 85% = endommagé (répare plus tôt)
         maxWallHits: 50000
+    },
+    
+    // ========== CONSTRUCTIONS ==========
+    
+    CONSTRUCTION_CONFIG: {
+        // 🔧 DOIT correspondre à CONTAINER_SOURCE_DISTANCE
+        sourceContainerMaxRange: 1,
+        autoPlaceSourceContainers: true,
+        autoPlaceInterval: 10
     },
     
     // ========== CONFIGURATION DES CORPS ==========
@@ -120,35 +137,21 @@ module.exports = {
     BODY_SIZE_MULTIPLIER: {
         worker: 1.0,
         lorry: 1.0,
-        miner: 1.0,
-        ldh: 1.0
-    },
-    
-    // ========== CONFIGURATION DES CONSTRUCTIONS ==========
-    
-    CONSTRUCTION_CONFIG: {
-        sourceContainerMaxRange: 1,
-        minBuildersForSourceContainers: 2,
-        autoPlaceSourceContainers: true,
-        autoPlaceInterval: 10
+        miner: 1.0
     },
     
     // ========== ÉCONOMIE ==========
     
     ENERGY_CONFIG: {
-        useMaxEnergyInProduction: true,
-        minContainerEnergy: 100
+        useMaxEnergyInProduction: true
     },
     
     // ========== RAPPORT ==========
     
     REPORT_INTERVAL: 100,
-    
-    // ========== OPTIONS AVANCÉES ==========
-    
     DEBUG_MODE: false,
     
-    // ========== MÉTHODES HELPER ==========
+    // ========== MÉTHODES HELPER (NE PAS MODIFIER) ==========
     
     getQuotasForPhase: function(phase) {
         return this[phase] || this.PRODUCTION;
@@ -178,7 +181,6 @@ module.exports = {
             return true;
         }
         console.log(`❌ Politique inconnue : ${policyName}`);
-        console.log(`   Politiques disponibles : ${Object.keys(this.POLICIES).filter(k => k !== 'current').join(', ')}`);
         return false;
     },
     
