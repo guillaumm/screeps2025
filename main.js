@@ -150,12 +150,6 @@ function spawnCreep(spawn, type, phase, emergency = false, assignment = null) {
         energy = spawn.room.energyAvailable;
     }
     
-    // 🔧 ATTENDRE assez d'énergie si pas d'urgence
-    if (!emergency && energy < 300) {
-        console.log(`[SPAWN] ⏳ Attente d'énergie (${energy}/300)`);
-        return;
-    }
-    
     let name = type.charAt(0).toUpperCase() + type.slice(1) + '_' + Game.time;
     let body, memory;
     
@@ -203,13 +197,22 @@ function spawnCreep(spawn, type, phase, emergency = false, assignment = null) {
             break;
     }
     
+    // 🔧 FIX: Calculer le coût AVANT la vérification
+    let bodyCost = calculateCost(body);
+    
+    // Vérifier qu'on a assez d'énergie
+    if (bodyCost > energy) {
+        console.log(`⏳ [${phase}] Pas assez d'énergie pour ${type} (besoin: ${bodyCost}, dispo: ${energy})`);
+        return;
+    }
+    
     let result = spawn.spawnCreep(body, name, { memory: memory });
     
     if (result === OK) {
         let prefix = emergency ? '🚨' : '✅';
-        console.log(`${prefix} [${phase}] Spawning ${type}: ${name} (${body.length} parts, ${calculateCost(body)} energy)`);
+        console.log(`${prefix} [${phase}] Spawning ${type}: ${name} (${body.length} parts, ${bodyCost} energy)`);
     } else if (result === ERR_NOT_ENOUGH_ENERGY) {
-        console.log(`⏳ [${phase}] Pas assez d'énergie pour ${type} (besoin: ${calculateCost(body)}, dispo: ${energy})`);
+        console.log(`⏳ [${phase}] ERR_NOT_ENOUGH_ENERGY pour ${type} (besoin: ${bodyCost}, dispo: ${energy})`);
     } else {
         console.log(`❌ Failed to spawn ${type}: ${result}`);
     }

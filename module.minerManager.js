@@ -12,15 +12,34 @@ module.exports = {
      */
     analyzeMinerNeeds: function(room) {
         let sources = room.find(FIND_SOURCES);
-        let existingMiners = _.filter(Game.creeps, c => c.memory.role == 'miner');
+        // 🔧 FIX: Filtrer seulement les miners de CETTE room
+        let existingMiners = _.filter(Game.creeps, c => 
+            c.memory.role == 'miner' && 
+            c.room.name == room.name
+        );
         
         let needs = [];
         
         for (let source of sources) {
-            // Vérifier si cette source a déjà un miner
+            // Vérifier si cette source a déjà un miner (vivant ou spawning)
             let assignedMiner = _.find(existingMiners, m => m.memory.sourceId == source.id);
             
-            if (!assignedMiner) {
+            // Vérifier aussi spawning miners
+            let spawningMiner = false;
+            for (let spawnName in Game.spawns) {
+                let spawn = Game.spawns[spawnName];
+                if (spawn.spawning) {
+                    let spawningCreep = Game.creeps[spawn.spawning.name];
+                    if (spawningCreep && 
+                        spawningCreep.memory.role == 'miner' && 
+                        spawningCreep.memory.sourceId == source.id) {
+                        spawningMiner = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (!assignedMiner && !spawningMiner) {
                 // 🔧 Utiliser la constante globale
                 let containers = source.pos.findInRange(FIND_STRUCTURES, 
                     CONFIG.CONTAINER_SOURCE_DISTANCE, {
