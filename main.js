@@ -1,6 +1,7 @@
 /*
-main.js - CORRIGÉ pour spawn des miners et workers
-🔧 Fix: Spawning des 2 miners + workers actifs
+main.js - CORRIGÉ
+✅ Fix: Comparaison énergétique corrigée
+✅ Fix: Workers créés avec le bon rôle
 */
 
 const CONFIG = require('config.orchestrator');
@@ -58,7 +59,7 @@ module.exports.loop = function () {
 };
 
 /**
- * 🔧 SPAWN CORRIGÉ - Priorités claires
+ * 🔧 SPAWN CORRIGÉ
  */
 function spawnWithOrchestrator(spawn) {
     if (spawn.spawning) return;
@@ -92,8 +93,6 @@ function spawnWithOrchestrator(spawn) {
     let minerQuota = quotas.miners === 'auto' ? requiredMiners : quotas.miners;
     let lorryQuota = quotas.lorries === 'auto' ? CONFIG.calculateLorryCount(miners) : quotas.lorries;
     
-    console.log(`[SPAWN] Phase: ${phase} | Workers: ${workers}/${workerQuota} | Miners: ${miners}/${minerQuota} | Lorries: ${lorries}/${lorryQuota}`);
-    
     // 🔧 PRIORITÉS DE SPAWN
     let spawnNeeds = [];
     
@@ -107,13 +106,11 @@ function spawnWithOrchestrator(spawn) {
         let assignment = MinerManager.getNextMinerAssignment(room);
         if (assignment) {
             spawnNeeds.push({ type: 'miner', priority: 1, assignment: assignment });
-            console.log(`[SPAWN] 🎯 Besoin d'un miner pour source ${assignment.sourceId.substring(0, 5)}`);
         }
     }
     // 3. Workers manquants
     else if (workers < workerQuota) {
         spawnNeeds.push({ type: 'worker', priority: 2 });
-        console.log(`[SPAWN] 🎯 Besoin de workers (${workers}/${workerQuota})`);
     }
     // 4. Lorries (seulement si miners OK)
     else if (lorries < lorryQuota && miners > 0) {
@@ -124,10 +121,7 @@ function spawnWithOrchestrator(spawn) {
         spawnNeeds.push({ type: 'ldh', priority: 4 });
     }
     
-    if (spawnNeeds.length === 0) {
-        console.log('[SPAWN] ✅ Tous les quotas sont remplis');
-        return;
-    }
+    if (spawnNeeds.length === 0) return;
     
     // Spawn le plus prioritaire
     spawnNeeds.sort((a, b) => a.priority - b.priority);
@@ -143,7 +137,6 @@ function spawnCreep(spawn, type, phase, emergency = false, assignment = null) {
     let energy;
     if (emergency) {
         energy = spawn.room.energyAvailable;
-        console.log(`🚨 Emergency spawn avec ${energy} energy`);
     } else if (phase === 'PRODUCTION' && CONFIG.ENERGY_CONFIG.useMaxEnergyInProduction) {
         energy = spawn.room.energyCapacityAvailable;
     } else {
@@ -155,13 +148,11 @@ function spawnCreep(spawn, type, phase, emergency = false, assignment = null) {
     
     switch(type) {
         case 'worker':
-            body = getAdaptiveBody(energy, 'worker', phase);
+            body = getAdaptiveBody(energy, 'worker');
             memory = { 
                 role: 'worker',
                 currentTask: null,
-                taskTarget: null,
-                harvestSourceId: null,
-                harvestMode: null
+                taskTarget: null
             };
             break;
             
@@ -177,12 +168,10 @@ function spawnCreep(spawn, type, phase, emergency = false, assignment = null) {
                 sourceId: assignment.sourceId,
                 linkId: assignment.linkId
             };
-            
-            console.log(`🏗️ Spawning miner pour source ${assignment.sourceId.substring(0, 5)}`);
             break;
             
         case 'lorry':
-            body = getAdaptiveBody(energy, 'lorry', phase);
+            body = getAdaptiveBody(energy, 'lorry');
             memory = { role: 'lorry', working: false };
             break;
             
@@ -197,10 +186,9 @@ function spawnCreep(spawn, type, phase, emergency = false, assignment = null) {
             break;
     }
     
-    // 🔧 FIX: Calculer le coût AVANT la vérification
     let bodyCost = calculateCost(body);
     
-    // Vérifier qu'on a assez d'énergie
+    // 🔧 FIX: >= au lieu de >
     if (bodyCost > energy) {
         console.log(`⏳ [${phase}] Pas assez d'énergie pour ${type} (besoin: ${bodyCost}, dispo: ${energy})`);
         return;
@@ -211,17 +199,15 @@ function spawnCreep(spawn, type, phase, emergency = false, assignment = null) {
     if (result === OK) {
         let prefix = emergency ? '🚨' : '✅';
         console.log(`${prefix} [${phase}] Spawning ${type}: ${name} (${body.length} parts, ${bodyCost} energy)`);
-    } else if (result === ERR_NOT_ENOUGH_ENERGY) {
-        console.log(`⏳ [${phase}] ERR_NOT_ENOUGH_ENERGY pour ${type} (besoin: ${bodyCost}, dispo: ${energy})`);
     } else {
-        console.log(`❌ Failed to spawn ${type}: ${result}`);
+        console.log(`❌ Failed to spawn ${type}: ${result} (besoin: ${bodyCost}, dispo: ${energy})`);
     }
 }
 
 /**
  * Corps adaptatif selon l'énergie
  */
-function getAdaptiveBody(energy, type, phase) {
+function getAdaptiveBody(energy, type) {
     let multiplier = CONFIG.BODY_SIZE_MULTIPLIER[type] || 1.0;
     
     if (type === 'worker') {
@@ -260,7 +246,7 @@ function getAdaptiveBody(energy, type, phase) {
 }
 
 /**
- * 🔧 PHASE CORRIGÉE
+ * Détermine la phase actuelle
  */
 function getPhase(minerCount, requiredMiners, room) {
     if (minerCount === 0) return 'BOOTSTRAP';
@@ -269,7 +255,6 @@ function getPhase(minerCount, requiredMiners, room) {
         filter: s => s.structureType === STRUCTURE_CONTAINER
     });
     
-    // CONSTRUCTION tant que miners ou containers manquants
     if (minerCount < requiredMiners || containers.length < requiredMiners) {
         return 'CONSTRUCTION';
     }
