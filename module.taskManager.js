@@ -1,7 +1,7 @@
 /*
-Task Manager - NETTOYÉ ET SIMPLIFIÉ
-✅ Logique claire : vide = harvest, plein = travail
-✅ Suppression du code debug excessif
+Task Manager - UPGRADE EN PERMANENCE
+🎯 Workers actifs dès qu'ils ont de l'énergie
+⚡ Upgrade par défaut si pas d'autre priorité
 */
 
 const CONFIG = require('config.orchestrator');
@@ -19,6 +19,13 @@ const TASKS = {
 module.exports = {
     
     run: function(creep) {
+        // 🔧 DEBUG: Log pour voir ce qui se passe
+        if (Game.time % 10 === 0) {
+            let energy = creep.store[RESOURCE_ENERGY];
+            let task = creep.memory.currentTask;
+            console.log(`[${creep.name}] Energy: ${energy}, Task: ${task || 'NONE'}`);
+        }
+        
         // Affichage de la tâche
         if (CONFIG.TASK_CONFIG.displayTasksWithSay && 
             Game.time % CONFIG.TASK_CONFIG.sayFrequency === 0) {
@@ -33,15 +40,18 @@ module.exports = {
         if (currentEnergy === 0 && creep.memory.currentTask !== TASKS.HARVEST) {
             creep.memory.currentTask = TASKS.HARVEST;
             creep.memory.taskTarget = null;
+            console.log(`[${creep.name}] 🔄 Switch to HARVEST (empty)`);
         }
         else if (currentEnergy > 0 && creep.memory.currentTask === TASKS.HARVEST) {
             // Dès qu'on a de l'énergie, on travaille
             creep.memory.currentTask = null;
             creep.memory.taskTarget = null;
+            console.log(`[${creep.name}] 🔄 Switch to WORK (has energy: ${currentEnergy})`);
         }
         
         // Si pas de tâche ou tâche terminée, en assigner une
         if (!creep.memory.currentTask || this.isTaskComplete(creep)) {
+            console.log(`[${creep.name}] 🎯 Assigning new task...`);
             this.assignBestTask(creep);
         }
         
@@ -53,8 +63,11 @@ module.exports = {
         let room = creep.room;
         let currentEnergy = creep.store[RESOURCE_ENERGY];
         
+        console.log(`[${creep.name}] assignBestTask called, energy: ${currentEnergy}`);
+        
         // Si vide → harvest
         if (currentEnergy === 0) {
+            console.log(`[${creep.name}] ➜ HARVEST (no energy)`);
             return this.assignHarvestTask(creep);
         }
         
@@ -62,34 +75,52 @@ module.exports = {
         let situation = this.analyzeRoomSituation(room);
         let policy = CONFIG.getActivePolicy();
         
+        console.log(`[${creep.name}] Situation: energy=${situation.energyPercent.toFixed(2)}, repairs=${situation.repairStats.damaged}, sites=${situation.constructionSites}`);
+        
         // 🔴 CAS SPÉCIAL: Seul creep vivant
         let totalCreeps = _.filter(Game.creeps, c => c.room.name === room.name).length;
         if (totalCreeps === 1) {
+            console.log(`[${creep.name}] ⚠️ SEUL CREEP mode`);
             if (situation.energyPercent < 0.5) {
-                if (this.assignTransferTask(creep, situation)) return;
+                if (this.assignTransferTask(creep, situation)) {
+                    console.log(`[${creep.name}] ➜ TRANSFER (solo mode)`);
+                    return;
+                }
             }
-            return this.assignUpgradeTask(creep);
+            console.log(`[${creep.name}] ➜ UPGRADE (solo mode)`);
+            return this.assignUpgradeTask(creep, situation);
         }
         
         // 🔴 PRIORITÉS ABSOLUES
         
         // 1. Spawn/Extensions critiques (< 30%)
         if (situation.energyPercent < CONFIG.TASK_CONFIG.criticalEnergyThreshold) {
-            if (this.assignTransferTask(creep, situation)) return;
+            if (this.assignTransferTask(creep, situation)) {
+                console.log(`[${creep.name}] ➜ TRANSFER (critical energy)`);
+                return;
+            }
         }
         
         // 2. Structures critiques (< 30% HP)
         if (situation.repairStats.critical > 0) {
-            if (this.assignRepairTask(creep, situation)) return;
+            if (this.assignRepairTask(creep, situation)) {
+                console.log(`[${creep.name}] ➜ REPAIR (critical)`);
+                return;
+            }
         }
         
         // 3. Containers sources manquants
         if (situation.missingContainers > 0) {
-            if (this.assignBuildTask(creep, situation)) return;
+            if (this.assignBuildTask(creep, situation)) {
+                console.log(`[${creep.name}] ➜ BUILD (containers)`);
+                return;
+            }
         }
         
         // 🟡 PRIORITÉS NORMALES (basées sur politique)
+        
         let priorities = this.calculatePriorities(situation, policy);
+        console.log(`[${creep.name}] Priorities: ${priorities.join(' > ')}`);
         
         for (let taskType of priorities) {
             let assigned = false;
@@ -105,25 +136,32 @@ module.exports = {
                     assigned = this.assignRepairTask(creep, situation);
                     break;
                 case TASKS.UPGRADE:
-                    assigned = this.assignUpgradeTask(creep);
+                    assigned = this.assignUpgradeTask(creep, situation);
                     break;
             }
             
-            if (assigned) return;
+            if (assigned) {
+                console.log(`[${creep.name}] ➜ ${taskType}`);
+                return;
+            }
         }
         
         // 🎯 FALLBACK GARANTI: UPGRADE (toujours possible)
-        this.assignUpgradeTask(creep);
+        console.log(`[${creep.name}] ➜ UPGRADE (fallback)`);
+        this.assignUpgradeTask(creep, situation);
     },
     
     analyzeRoomSituation: function(room) {
         let situation = {
             energyPercent: room.energyAvailable / room.energyCapacityAvailable,
             storageEnergy: room.storage ? room.storage.store[RESOURCE_ENERGY] : 0,
+            
             repairStats: RepairManager.getRepairStats(room),
             missingContainers: ConstructionManager.countMissingSourceContainers(room),
             constructionSites: room.find(FIND_CONSTRUCTION_SITES).length,
+            
             workerStats: this.getWorkerDistribution(room),
+            
             needsTransfer: false,
             transferUrgency: 0
         };
@@ -242,7 +280,7 @@ module.exports = {
             filter: r => r.resourceType == RESOURCE_ENERGY && r.amount > 50
         });
         if (droppedEnergy) {
-            creep.memory.taskTarget = droppedEnergy.id;
+            creep.memory.harvestSourceId = droppedEnergy.id;
             creep.memory.harvestMode = 'pickup';
             return true;
         }
@@ -253,14 +291,14 @@ module.exports = {
                         s.store[RESOURCE_ENERGY] >= CONFIG.MIN_CONTAINER_ENERGY
         });
         if (container) {
-            creep.memory.taskTarget = container.id;
+            creep.memory.harvestSourceId = container.id;
             creep.memory.harvestMode = 'container';
             return true;
         }
         
         // 3. Storage
         if (creep.room.storage && creep.room.storage.store[RESOURCE_ENERGY] > 1000) {
-            creep.memory.taskTarget = creep.room.storage.id;
+            creep.memory.harvestSourceId = creep.room.storage.id;
             creep.memory.harvestMode = 'storage';
             return true;
         }
@@ -270,7 +308,7 @@ module.exports = {
         if (availableSources.length > 0) {
             let closestSource = creep.pos.findClosestByPath(availableSources);
             if (closestSource) {
-                creep.memory.taskTarget = closestSource.id;
+                creep.memory.harvestSourceId = closestSource.id;
                 creep.memory.harvestMode = 'source';
                 return true;
             }
@@ -299,7 +337,7 @@ module.exports = {
         return true;
     },
     
-    assignUpgradeTask: function(creep) {
+    assignUpgradeTask: function(creep, situation) {
         creep.memory.currentTask = TASKS.UPGRADE;
         creep.memory.taskTarget = creep.room.controller.id;
         return true;
@@ -307,6 +345,7 @@ module.exports = {
     
     assignTransferTask: function(creep, situation) {
         // Priorité: Spawn → Extensions → Tours → Storage
+        
         let targets = creep.room.find(FIND_MY_STRUCTURES, {
             filter: s => (
                 s.structureType === STRUCTURE_SPAWN ||
@@ -380,7 +419,7 @@ module.exports = {
             return;
         }
         
-        let target = Game.getObjectById(creep.memory.taskTarget);
+        let target = Game.getObjectById(creep.memory.harvestSourceId);
         if (!target) {
             creep.memory.currentTask = null;
             return;
