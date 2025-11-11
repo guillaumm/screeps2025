@@ -1,606 +1,519 @@
 /*
- * main.js - VERSION AVEC SYSTÈME DE TÂCHES AMÉLIORÉ
- * - Génère liste complète (harvest, transfer, build, repair, upgrade)
- * - Évite assignations multiples sur même tâche
- * - Spawn intelligent avec matelas de sécurité
+ * main.js - ARCHITECTURE À RÔLES DIFFÉRENCIÉS
+ * 
+ * APPROCHE SYSTÉMIQUE :
+ * - Miners : Sous-système PRODUCTION (Sources → Containers/Extensions)
+ * - Workers : Sous-système LOGISTIQUE (Énergie disponible → Travail)
+ * 
+ * Chaque acteur a un périmètre clair et des objectifs non-conflictuels
  */
 
 // Configuration
 const CONFIG = {
     MAX_CREEPS: 10,
-    ENERGY_SAFETY_BUFFER: 300, // Énergie à garder en réserve
+    MINERS_PER_SOURCE: 2,
+    MIN_WORKERS: 3,
+    ENERGY_SAFETY_BUFFER: 300,
     MIN_SPAWN_ENERGY: 200,
     REPORT_INTERVAL: 20
 };
 
 module.exports.loop = function () {
     
-    // Nettoyage mémoire des creeps morts
+    // Nettoyage mémoire
     for (let name in Memory.creeps) {
         if (!Game.creeps[name]) {
             delete Memory.creeps[name];
         }
     }
     
-    // Trouver le spawn principal
     let spawn = Game.spawns['Spawn1'];
     if (!spawn) return;
     
     let room = spawn.room;
     
-    // Générer la liste des tâches disponibles
-    let tasks = generateTaskList(room);
+    // Analyser la population
+    let population = analyzePopulation();
     
-    // Compter les assignations actuelles
-    let taskAssignments = countTaskAssignments();
+    // Générer les tâches pour chaque type
+    let minerTasks = generateMinerTasks(room);
+    let workerTasks = generateWorkerTasks(room);
     
-    // Afficher les tâches (debug)
+    // Affichage périodique
     if (Game.time % CONFIG.REPORT_INTERVAL === 0) {
-        reportTasks(tasks, taskAssignments);
+        reportStatus(population, minerTasks, workerTasks);
     }
     
-    // Spawner un creep si possible (avec matelas de sécurité)
+    // Spawner selon les besoins
     if (!spawn.spawning) {
-        spawnCreepSmart(spawn);
+        spawnCreepSmart(spawn, population);
     }
     
-    // Faire travailler tous les creeps
+    // Exécuter les rôles
     for (let name in Game.creeps) {
         let creep = Game.creeps[name];
-        runCreep(creep, tasks, taskAssignments);
+        
+        if (creep.memory.role === 'miner') {
+            runMiner(creep, minerTasks);
+        } else if (creep.memory.role === 'worker') {
+            runWorker(creep, workerTasks);
+        }
     }
 };
 
 /**
- * 📋 GÉNÈRE LA LISTE COMPLÈTE DES TÂCHES
+ * 📊 ANALYSE DE LA POPULATION
  */
-function generateTaskList(room) {
+function analyzePopulation() {
+    let miners = _.filter(Game.creeps, c => c.memory.role === 'miner');
+    let workers = _.filter(Game.creeps, c => c.memory.role === 'worker');
+    
+    return {
+        miners: miners,
+        workers: workers,
+        minerCount: miners.length,
+        workerCount: workers.length,
+        total: miners.length + workers.length
+    };
+}
+
+/**
+ * ⛏️ GÉNÉRATION DES TÂCHES MINERS
+ * Objectif : Extraire énergie des sources et remplir extensions proches
+ */
+function generateMinerTasks(room) {
     let tasks = [];
+    let sources = room.find(FIND_SOURCES);
     
-    // 1. HARVEST - Sources d'énergie disponibles
-    tasks = tasks.concat(generateHarvestTasks(room));
-    
-    // 2. TRANSFER - Structures à remplir
-    tasks = tasks.concat(generateTransferTasks(room));
-    
-    // 3. BUILD - Sites de construction
-    tasks = tasks.concat(generateBuildTasks(room));
-    
-    // 4. REPAIR - Structures endommagées
-    tasks = tasks.concat(generateRepairTasks(room));
-    
-    // 5. UPGRADE - Room controller
-    tasks = tasks.concat(generateUpgradeTasks(room));
-    
-    // Trier par priorité décroissante
-    tasks.sort((a, b) => b.priority - a.priority);
+    sources.forEach(source => {
+        // Trouver containers près de la source
+        let containers = source.pos.findInRange(FIND_STRUCTURES, 2, {
+            filter: s => s.structureType === STRUCTURE_CONTAINER
+        });
+        
+        // Trouver extensions proches (range 5)
+        let nearbyExtensions = source.pos.findInRange(FIND_MY_STRUCTURES, 5, {
+            filter: s => (s.structureType === STRUCTURE_EXTENSION || 
+                         s.structureType === STRUCTURE_SPAWN) &&
+                         s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+        });
+        
+        tasks.push({
+            sourceId: source.id,
+            sourcePos: source.pos,
+            hasContainer: containers.length > 0,
+            containerId: containers.length > 0 ? containers[0].id : null,
+            nearbyExtensions: nearbyExtensions.map(e => e.id),
+            assignedMiners: 0,
+            maxMiners: CONFIG.MINERS_PER_SOURCE
+        });
+    });
     
     return tasks;
 }
 
 /**
- * ⛏️ HARVEST - Récupérer de l'énergie
+ * 🔨 GÉNÉRATION DES TÂCHES WORKERS
+ * Objectif : Récupérer énergie passive et l'utiliser (build/repair/upgrade)
  */
-function generateHarvestTasks(room) {
-    let tasks = [];
+function generateWorkerTasks(room) {
+    let tasks = {
+        harvest: [],
+        work: []
+    };
     
-    // Énergie tombée au sol
-    let droppedResources = room.find(FIND_DROPPED_RESOURCES, {
-        filter: r => r.resourceType === RESOURCE_ENERGY
+    // === HARVEST : Sources d'énergie passives ===
+    
+    // 1. Énergie au sol (haute priorité)
+    let droppedEnergy = room.find(FIND_DROPPED_RESOURCES, {
+        filter: r => r.resourceType === RESOURCE_ENERGY && r.amount > 50
     });
-    
-    droppedResources.forEach(resource => {
-        let priority = 80 + (resource.amount / 100);
-        tasks.push({
-            type: 'harvest',
-            subtype: 'pickup',
+    droppedEnergy.forEach(resource => {
+        tasks.harvest.push({
+            type: 'pickup',
             targetId: resource.id,
             pos: resource.pos,
-            priority: priority,
+            priority: 90,
             amount: resource.amount
         });
     });
     
-    // Tombstones
+    // 2. Tombstones
     let tombstones = room.find(FIND_TOMBSTONES, {
-        filter: t => t.store[RESOURCE_ENERGY] > 0
+        filter: t => t.store[RESOURCE_ENERGY] > 50
     });
-    
     tombstones.forEach(tomb => {
-        let priority = 85 + (tomb.store[RESOURCE_ENERGY] / 100);
-        tasks.push({
-            type: 'harvest',
-            subtype: 'withdraw',
+        tasks.harvest.push({
+            type: 'withdraw',
             targetId: tomb.id,
             pos: tomb.pos,
-            priority: priority,
+            priority: 85,
             amount: tomb.store[RESOURCE_ENERGY]
         });
     });
     
-    // Containers avec énergie
+    // 3. Containers pleins
     let containers = room.find(FIND_STRUCTURES, {
-        filter: s => s.structureType === STRUCTURE_CONTAINER && 
-                     s.store[RESOURCE_ENERGY] > 100
+        filter: s => s.structureType === STRUCTURE_CONTAINER &&
+                     s.store[RESOURCE_ENERGY] > 200
     });
-    
     containers.forEach(container => {
-        let priority = 70 + (container.store[RESOURCE_ENERGY] / 200);
-        tasks.push({
-            type: 'harvest',
-            subtype: 'withdraw',
+        tasks.harvest.push({
+            type: 'withdraw',
             targetId: container.id,
             pos: container.pos,
-            priority: priority,
+            priority: 70,
             amount: container.store[RESOURCE_ENERGY]
         });
     });
     
-    // Sources actives (si pas assez d'énergie passive)
-    let sources = room.find(FIND_SOURCES_ACTIVE);
-    sources.forEach(source => {
-        tasks.push({
-            type: 'harvest',
-            subtype: 'mine',
-            targetId: source.id,
-            pos: source.pos,
-            priority: 50,
-            amount: source.energy
-        });
-    });
-    
-    return tasks;
-}
-
-/**
- * 📦 TRANSFER - Remplir les structures
- */
-function generateTransferTasks(room) {
-    let tasks = [];
-    
-    // Spawns et extensions
-    let structures = room.find(FIND_MY_STRUCTURES, {
-        filter: s => (
-            s.structureType === STRUCTURE_SPAWN ||
-            s.structureType === STRUCTURE_EXTENSION
-        ) && s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
-    });
-    
-    structures.forEach(structure => {
-        let capacity = structure.store.getFreeCapacity(RESOURCE_ENERGY);
-        let priority = 100;
-        
-        // Encore plus urgent si spawn complètement vide
-        if (structure.structureType === STRUCTURE_SPAWN && 
-            structure.store[RESOURCE_ENERGY] === 0) {
-            priority = 110;
-        }
-        
-        tasks.push({
-            type: 'transfer',
-            targetId: structure.id,
-            pos: structure.pos,
-            priority: priority,
-            amount: capacity
-        });
-    });
-    
-    // Tours (moins prioritaire)
-    let towers = room.find(FIND_MY_STRUCTURES, {
-        filter: s => s.structureType === STRUCTURE_TOWER &&
-                     s.store.getFreeCapacity(RESOURCE_ENERGY) > 100
-    });
-    
-    towers.forEach(tower => {
-        let fillPercent = tower.store[RESOURCE_ENERGY] / tower.store.getCapacity(RESOURCE_ENERGY);
-        let priority = 60 + (1 - fillPercent) * 20;
-        
-        tasks.push({
-            type: 'transfer',
-            targetId: tower.id,
-            pos: tower.pos,
-            priority: priority,
-            amount: tower.store.getFreeCapacity(RESOURCE_ENERGY)
-        });
-    });
-    
-    // Storage (si existe, basse priorité)
-    if (room.storage && room.storage.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
-        tasks.push({
-            type: 'transfer',
+    // 4. Storage (dernier recours)
+    if (room.storage && room.storage.store[RESOURCE_ENERGY] > 1000) {
+        tasks.harvest.push({
+            type: 'withdraw',
             targetId: room.storage.id,
             pos: room.storage.pos,
-            priority: 30,
-            amount: room.storage.store.getFreeCapacity(RESOURCE_ENERGY)
+            priority: 40,
+            amount: room.storage.store[RESOURCE_ENERGY]
         });
     }
     
-    return tasks;
-}
-
-/**
- * 🔨 BUILD - Construire
- */
-function generateBuildTasks(room) {
-    let tasks = [];
+    // === WORK : Tâches de travail ===
     
-    let sites = room.find(FIND_CONSTRUCTION_SITES);
-    
-    sites.forEach(site => {
-        let priority = 65;
-        
-        // Prioriser selon le type
-        if (site.structureType === STRUCTURE_SPAWN) priority = 95;
-        else if (site.structureType === STRUCTURE_EXTENSION) priority = 85;
-        else if (site.structureType === STRUCTURE_TOWER) priority = 80;
-        else if (site.structureType === STRUCTURE_CONTAINER) priority = 75;
-        else if (site.structureType === STRUCTURE_STORAGE) priority = 70;
-        else if (site.structureType === STRUCTURE_ROAD) priority = 40;
-        else if (site.structureType === STRUCTURE_WALL) priority = 35;
-        else if (site.structureType === STRUCTURE_RAMPART) priority = 35;
-        
-        // Bonus si proche de la fin
-        let progressPercent = site.progress / site.progressTotal;
-        if (progressPercent > 0.8) priority += 10;
-        
-        tasks.push({
-            type: 'build',
-            targetId: site.id,
-            pos: site.pos,
-            priority: priority,
-            amount: site.progressTotal - site.progress,
-            structureType: site.structureType
-        });
+    // 1. TRANSFER - Spawns/Extensions/Towers vides
+    let structures = room.find(FIND_MY_STRUCTURES, {
+        filter: s => (s.structureType === STRUCTURE_SPAWN ||
+                     s.structureType === STRUCTURE_EXTENSION ||
+                     s.structureType === STRUCTURE_TOWER) &&
+                     s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
     });
-    
-    return tasks;
-}
-
-/**
- * 🔧 REPAIR - Réparer
- */
-function generateRepairTasks(room) {
-    let tasks = [];
-    
-    let structures = room.find(FIND_STRUCTURES, {
-        filter: s => s.hits < s.hitsMax && 
-                     s.structureType !== STRUCTURE_WALL &&
-                     s.structureType !== STRUCTURE_RAMPART
-    });
-    
     structures.forEach(structure => {
-        let hitsPercent = structure.hits / structure.hitsMax;
-        
-        // Ignorer si > 80% HP (sauf critique)
-        if (hitsPercent > 0.8) return;
-        
-        let priority = 55;
-        
-        // Critique si < 30% HP
-        if (hitsPercent < 0.3) {
-            priority = 90;
-        }
-        // Urgent si < 50% HP
-        else if (hitsPercent < 0.5) {
-            priority = 75;
-        }
-        
-        // Prioriser types importants
-        if (structure.structureType === STRUCTURE_SPAWN) priority += 20;
-        else if (structure.structureType === STRUCTURE_TOWER) priority += 15;
-        else if (structure.structureType === STRUCTURE_EXTENSION) priority += 10;
-        else if (structure.structureType === STRUCTURE_CONTAINER) priority += 5;
-        
-        tasks.push({
-            type: 'repair',
+        let priority = structure.structureType === STRUCTURE_SPAWN ? 100 : 95;
+        tasks.work.push({
+            type: 'transfer',
             targetId: structure.id,
             pos: structure.pos,
             priority: priority,
-            amount: structure.hitsMax - structure.hits,
             structureType: structure.structureType
         });
     });
     
-    return tasks;
-}
-
-/**
- * ⚡ UPGRADE - Améliorer le controller
- */
-function generateUpgradeTasks(room) {
-    let tasks = [];
-    
-    if (!room.controller || !room.controller.my) return tasks;
-    
-    let controller = room.controller;
-    let priority = 45;
-    
-    // URGENT si risque de downgrade
-    if (controller.ticksToDowngrade) {
-        let downgradePercent = controller.ticksToDowngrade / 20000;
+    // 2. BUILD
+    let sites = room.find(FIND_CONSTRUCTION_SITES);
+    sites.forEach(site => {
+        let priority = 60;
+        if (site.structureType === STRUCTURE_EXTENSION) priority = 80;
+        else if (site.structureType === STRUCTURE_TOWER) priority = 75;
+        else if (site.structureType === STRUCTURE_CONTAINER) priority = 70;
         
-        if (downgradePercent < 0.2) {
-            priority = 95;
-        } else if (downgradePercent < 0.5) {
-            priority = 70;
-        }
-    }
-    
-    // Si proche de level up, augmenter priorité
-    if (controller.level < 8 && controller.progress) {
-        let progressPercent = controller.progress / controller.progressTotal;
-        if (progressPercent > 0.9) priority += 15;
-    }
-    
-    tasks.push({
-        type: 'upgrade',
-        targetId: controller.id,
-        pos: controller.pos,
-        priority: priority,
-        amount: Infinity
+        tasks.work.push({
+            type: 'build',
+            targetId: site.id,
+            pos: site.pos,
+            priority: priority,
+            structureType: site.structureType
+        });
     });
     
+    // 3. REPAIR
+    let damagedStructures = room.find(FIND_STRUCTURES, {
+        filter: s => s.hits < s.hitsMax * 0.7 &&
+                     s.structureType !== STRUCTURE_WALL &&
+                     s.structureType !== STRUCTURE_RAMPART
+    });
+    damagedStructures.forEach(structure => {
+        let hitsPercent = structure.hits / structure.hitsMax;
+        let priority = hitsPercent < 0.3 ? 85 : 55;
+        
+        tasks.work.push({
+            type: 'repair',
+            targetId: structure.id,
+            pos: structure.pos,
+            priority: priority,
+            structureType: structure.structureType
+        });
+    });
+    
+    // 4. UPGRADE
+    if (room.controller && room.controller.my) {
+        let priority = 45;
+        
+        if (room.controller.ticksToDowngrade) {
+            let downgradePercent = room.controller.ticksToDowngrade / 20000;
+            if (downgradePercent < 0.3) priority = 90;
+        }
+        
+        tasks.work.push({
+            type: 'upgrade',
+            targetId: room.controller.id,
+            pos: room.controller.pos,
+            priority: priority
+        });
+    }
+    
+    // Trier par priorité
+    tasks.harvest.sort((a, b) => b.priority - a.priority);
+    tasks.work.sort((a, b) => b.priority - a.priority);
+    
     return tasks;
 }
 
 /**
- * 📊 COMPTE LES ASSIGNATIONS ACTUELLES
- * Retourne {targetId: nombre_de_creeps}
+ * ⛏️ LOGIQUE MINER
+ * Rôle : Extraire énergie d'UNE source et remplir extensions proches
  */
-function countTaskAssignments() {
-    let assignments = {};
+function runMiner(creep, minerTasks) {
     
-    for (let name in Game.creeps) {
-        let creep = Game.creeps[name];
-        if (creep.memory.taskId) {
-            if (!assignments[creep.memory.taskId]) {
-                assignments[creep.memory.taskId] = 0;
+    // Si pas encore assigné à une source
+    if (!creep.memory.sourceId) {
+        // Trouver une source qui a besoin de miners
+        for (let task of minerTasks) {
+            if (task.assignedMiners < task.maxMiners) {
+                creep.memory.sourceId = task.sourceId;
+                creep.memory.extensions = task.nearbyExtensions;
+                task.assignedMiners++;
+                break;
             }
-            assignments[creep.memory.taskId]++;
         }
     }
     
-    return assignments;
-}
-
-/**
- * 🤖 LOGIQUE CREEP - Assigne et exécute les tâches
- */
-function runCreep(creep, tasks, taskAssignments) {
+    if (!creep.memory.sourceId) return;
+    
+    let source = Game.getObjectById(creep.memory.sourceId);
+    if (!source) {
+        creep.memory.sourceId = null;
+        return;
+    }
     
     let currentEnergy = creep.store[RESOURCE_ENERGY];
     let maxEnergy = creep.store.getCapacity(RESOURCE_ENERGY);
     
-    // Gérer transitions d'état
+    // États
+    if (creep.memory.delivering && currentEnergy === 0) {
+        creep.memory.delivering = false;
+    } else if (!creep.memory.delivering && currentEnergy === maxEnergy) {
+        creep.memory.delivering = true;
+    }
+    
+    // === MODE DELIVERING : Remplir extensions proches ===
+    if (creep.memory.delivering) {
+        let extensions = creep.memory.extensions || [];
+        let target = null;
+        
+        for (let extId of extensions) {
+            let ext = Game.getObjectById(extId);
+            if (ext && ext.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+                target = ext;
+                break;
+            }
+        }
+        
+        if (target) {
+            if (creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+                creep.moveTo(target, {visualizePathStyle: {stroke: '#00ff00'}});
+            }
+        } else {
+            // Plus d'extensions à remplir, retourner à la source
+            creep.memory.delivering = false;
+        }
+    }
+    // === MODE MINING : Extraire de la source ===
+    else {
+        if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
+            creep.moveTo(source, {visualizePathStyle: {stroke: '#ffaa00'}});
+        }
+    }
+}
+
+/**
+ * 🔨 LOGIQUE WORKER
+ * Rôle : Récupérer énergie passive et travailler
+ */
+function runWorker(creep, workerTasks) {
+    
+    let currentEnergy = creep.store[RESOURCE_ENERGY];
+    let maxEnergy = creep.store.getCapacity(RESOURCE_ENERGY);
+    
+    // États
     if (creep.memory.working && currentEnergy === 0) {
         creep.memory.working = false;
         creep.memory.taskId = null;
-        creep.memory.taskType = null;
-    }
-    else if (!creep.memory.working && currentEnergy === maxEnergy) {
+    } else if (!creep.memory.working && currentEnergy === maxEnergy) {
         creep.memory.working = true;
         creep.memory.taskId = null;
-        creep.memory.taskType = null;
     }
     
-    // Mode HARVEST: chercher de l'énergie
+    // === MODE HARVEST : Récupérer énergie passive ===
     if (!creep.memory.working) {
-        let harvestTasks = tasks.filter(t => t.type === 'harvest');
-        if (harvestTasks.length > 0) {
-            // Prendre une tâche harvest non saturée
-            let task = findAvailableTask(harvestTasks, taskAssignments, 2); // Max 2 creeps par source
-            if (task) {
-                creep.memory.taskId = task.targetId;
-                creep.memory.taskType = task.type;
-                executeTask(creep, task);
+        if (workerTasks.harvest.length > 0) {
+            let task = workerTasks.harvest[0];
+            let target = Game.getObjectById(task.targetId);
+            
+            if (target) {
+                let result;
+                if (task.type === 'pickup') {
+                    result = creep.pickup(target);
+                } else {
+                    result = creep.withdraw(target, RESOURCE_ENERGY);
+                }
+                
+                if (result === ERR_NOT_IN_RANGE) {
+                    creep.moveTo(target, {visualizePathStyle: {stroke: '#ffaa00'}});
+                }
             }
         }
         return;
     }
     
-    // Mode WORKING: assigner une tâche si nécessaire
-    if (!creep.memory.taskId) {
-        let workTasks = tasks.filter(t => t.type !== 'harvest');
-        
-        if (workTasks.length > 0) {
-            // Prendre une tâche non saturée
-            let task = findAvailableTask(workTasks, taskAssignments, 1);
-            
-            if (task) {
-                creep.memory.taskId = task.targetId;
-                creep.memory.taskType = task.type;
-            }
-        }
+    // === MODE WORKING : Exécuter tâches ===
+    if (!creep.memory.taskId && workerTasks.work.length > 0) {
+        creep.memory.taskId = workerTasks.work[0].targetId;
     }
     
-    // Exécuter la tâche assignée
     if (creep.memory.taskId) {
-        let task = tasks.find(t => t.targetId === creep.memory.taskId);
+        let task = workerTasks.work.find(t => t.targetId === creep.memory.taskId);
         
-        if (task) {
-            executeTask(creep, task);
-        } else {
-            // Tâche terminée ou n'existe plus
+        if (!task) {
             creep.memory.taskId = null;
-            creep.memory.taskType = null;
-        }
-    }
-}
-
-/**
- * 🎯 TROUVE UNE TÂCHE DISPONIBLE (non saturée)
- * maxAssignments: nombre max de creeps par tâche
- */
-function findAvailableTask(tasks, taskAssignments, maxAssignments) {
-    for (let task of tasks) {
-        let currentAssignments = taskAssignments[task.targetId] || 0;
-        
-        // Upgrade peut avoir plusieurs creeps
-        if (task.type === 'upgrade') {
-            maxAssignments = 5;
+            return;
         }
         
-        if (currentAssignments < maxAssignments) {
-            return task;
+        let target = Game.getObjectById(task.targetId);
+        if (!target) {
+            creep.memory.taskId = null;
+            return;
         }
-    }
-    
-    // Si tout est saturé, retourner la première tâche quand même
-    return tasks[0] || null;
-}
-
-/**
- * ⚙️ EXÉCUTE UNE TÂCHE
- */
-function executeTask(creep, task) {
-    let target = Game.getObjectById(task.targetId);
-    if (!target) return;
-    
-    let result;
-    
-    switch(task.type) {
-        case 'harvest':
-            if (task.subtype === 'pickup') {
-                result = creep.pickup(target);
-            } else if (task.subtype === 'withdraw') {
-                result = creep.withdraw(target, RESOURCE_ENERGY);
-            } else if (task.subtype === 'mine') {
-                result = creep.harvest(target);
-            }
-            break;
-            
-        case 'transfer':
+        
+        let result;
+        if (task.type === 'transfer') {
             result = creep.transfer(target, RESOURCE_ENERGY);
-            break;
-            
-        case 'build':
+        } else if (task.type === 'build') {
             result = creep.build(target);
-            break;
-            
-        case 'repair':
+        } else if (task.type === 'repair') {
             result = creep.repair(target);
-            break;
-            
-        case 'upgrade':
+        } else if (task.type === 'upgrade') {
             result = creep.upgradeController(target);
-            break;
+        }
+        
+        if (result === ERR_NOT_IN_RANGE) {
+            creep.moveTo(target, {
+                reusePath: 10,
+                visualizePathStyle: {stroke: getTaskColor(task.type)}
+            });
+        }
     }
+}
+
+/**
+ * 👶 SPAWN INTELLIGENT
+ */
+function spawnCreepSmart(spawn, population) {
     
-    // Se déplacer si pas à portée
-    if (result === ERR_NOT_IN_RANGE) {
-        creep.moveTo(target, {
-            reusePath: 10,
-            visualizePathStyle: {stroke: getTaskColor(task.type)}
-        });
-    }
-}
-
-/**
- * 🎨 Couleurs de visualisation
- */
-function getTaskColor(taskType) {
-    switch(taskType) {
-        case 'harvest': return '#ffaa00';
-        case 'transfer': return '#ffffff';
-        case 'build': return '#00ff00';
-        case 'repair': return '#0000ff';
-        case 'upgrade': return '#ff00ff';
-        default: return '#808080';
-    }
-}
-
-/**
- * 👶 SPAWN INTELLIGENT avec matelas de sécurité
- */
-function spawnCreepSmart(spawn) {
+    if (population.total >= CONFIG.MAX_CREEPS) return;
+    
     let room = spawn.room;
-    let creeps = _.filter(Game.creeps);
-    
-    // Ne pas dépasser le max
-    if (creeps.length >= CONFIG.MAX_CREEPS) return;
+    let sources = room.find(FIND_SOURCES);
+    let maxMiners = sources.length * CONFIG.MINERS_PER_SOURCE;
     
     let availableEnergy = room.energyAvailable;
-    let capacityEnergy = room.energyCapacityAvailable;
+    let shouldSpawn = false;
+    let role = null;
+    let body = null;
     
-    // Calculer l'énergie utilisable (en gardant un buffer)
-    let usableEnergy = Math.max(
-        CONFIG.MIN_SPAWN_ENERGY,
-        availableEnergy - CONFIG.ENERGY_SAFETY_BUFFER
-    );
+    // PRIORITÉ 1 : Miners si pas assez
+    if (population.minerCount < maxMiners) {
+        role = 'miner';
+        shouldSpawn = true;
+    }
+    // PRIORITÉ 2 : Workers minimum
+    else if (population.workerCount < CONFIG.MIN_WORKERS) {
+        role = 'worker';
+        shouldSpawn = true;
+    }
+    // PRIORITÉ 3 : Workers supplémentaires
+    else if (population.workerCount < (CONFIG.MAX_CREEPS - maxMiners)) {
+        role = 'worker';
+        shouldSpawn = true;
+    }
     
-    // Ne spawn que si on a assez pour un creep minimal
+    if (!shouldSpawn) return;
+    
+    // Calculer énergie utilisable
+    let usableEnergy = availableEnergy;
+    
+    if (population.total > 0) {
+        usableEnergy = Math.max(
+            CONFIG.MIN_SPAWN_ENERGY,
+            availableEnergy - CONFIG.ENERGY_SAFETY_BUFFER
+        );
+    }
+    
     if (usableEnergy < CONFIG.MIN_SPAWN_ENERGY) return;
     
-    // URGENCE: aucun creep, utiliser toute l'énergie disponible
-    if (creeps.length === 0) {
-        usableEnergy = availableEnergy;
-        console.log('🚨 EMERGENCY SPAWN');
-    }
-    // Si peu de creeps (< 3), être plus agressif
-    else if (creeps.length < 3) {
-        usableEnergy = Math.min(capacityEnergy, availableEnergy - 100);
-    }
-    
-    // Corps adaptatif: [WORK, CARRY, MOVE] x N
+    // Créer corps adaptatif
     let units = Math.floor(usableEnergy / 200);
-    units = Math.min(units, 10);
+    units = Math.max(1, Math.min(units, 5));
     
-    if (units === 0) return;
-    
-    let body = [];
+    body = [];
     for (let i = 0; i < units; i++) {
         body.push(WORK, CARRY, MOVE);
     }
     
     let bodyCost = units * 200;
-    
-    // Vérifier qu'on a bien l'énergie
     if (bodyCost > availableEnergy) return;
     
-    let name = 'Worker_' + Game.time;
+    let name = role.charAt(0).toUpperCase() + role.slice(1) + '_' + Game.time;
     let result = spawn.spawnCreep(body, name, {
-        memory: { 
+        memory: {
+            role: role,
+            working: false,
             taskId: null,
-            taskType: null,
-            working: false
+            sourceId: null
         }
     });
     
     if (result === OK) {
-        console.log(`✅ Spawned ${name}: ${body.length} parts, ${bodyCost}E (buffer: ${CONFIG.ENERGY_SAFETY_BUFFER}E)`);
+        console.log(`✅ Spawned ${name} (${role}): ${body.length} parts, ${bodyCost}E`);
     }
 }
 
 /**
- * 📊 RAPPORT DES TÂCHES
+ * 📊 RAPPORT
  */
-function reportTasks(tasks, taskAssignments) {
-    console.log(`\n📋 ${tasks.length} TÂCHES DISPONIBLES`);
-    console.log('─'.repeat(50));
+function reportStatus(population, minerTasks, workerTasks) {
+    console.log('\n' + '='.repeat(60));
+    console.log(`🤖 POPULATION: ${population.minerCount} miners, ${population.workerCount} workers`);
     
-    // Compter par type
-    let byType = {};
-    tasks.forEach(t => {
-        if (!byType[t.type]) byType[t.type] = 0;
-        byType[t.type]++;
+    console.log('\n⛏️  MINERS:');
+    minerTasks.forEach((task, i) => {
+        let assigned = population.miners.filter(m => m.memory.sourceId === task.sourceId).length;
+        let status = assigned >= task.maxMiners ? '✅' : '⚠️';
+        console.log(`  Source ${i+1}: ${status} ${assigned}/${task.maxMiners} miners`);
     });
     
-    console.log('Par type:');
-    for (let type in byType) {
-        console.log(`  ${type}: ${byType[type]}`);
+    console.log('\n🔨 WORKERS:');
+    console.log(`  Harvest: ${workerTasks.harvest.length} sources`);
+    console.log(`  Work: ${workerTasks.work.length} tâches`);
+    
+    let workByType = {};
+    workerTasks.work.forEach(t => {
+        workByType[t.type] = (workByType[t.type] || 0) + 1;
+    });
+    
+    for (let type in workByType) {
+        console.log(`    - ${type}: ${workByType[type]}`);
     }
-    
-    console.log('\nTop 5 priorités:');
-    tasks.slice(0, 5).forEach(t => {
-        let assigned = taskAssignments[t.targetId] || 0;
-        let label = t.structureType || t.subtype || '';
-        console.log(`  ${t.type} ${label}: ${t.priority.toFixed(1)} [${assigned} creep(s)]`);
-    });
-    
-    // Statistiques creeps
-    let totalCreeps = Object.keys(Game.creeps).length;
-    let working = _.filter(Game.creeps, c => c.memory.working).length;
-    let harvesting = totalCreeps - working;
-    
-    console.log(`\n🤖 ${totalCreeps} creeps: ${working} work, ${harvesting} harvest`);
+}
+
+/**
+ * 🎨 Couleurs
+ */
+function getTaskColor(taskType) {
+    const colors = {
+        transfer: '#ffffff',
+        build: '#00ff00',
+        repair: '#0000ff',
+        upgrade: '#ff00ff'
+    };
+    return colors[taskType] || '#808080';
 }
