@@ -1,8 +1,17 @@
 /*
- * main.js - VERSION AVEC SYSTÈME DE TÂCHES
- * Génère une liste de tâches avec positions et priorités
- * Assigne les tâches aux creeps de manière basique
+ * main.js - VERSION AVEC SYSTÈME DE TÂCHES AMÉLIORÉ
+ * - Génère liste complète (harvest, transfer, build, repair, upgrade)
+ * - Évite assignations multiples sur même tâche
+ * - Spawn intelligent avec matelas de sécurité
  */
+
+// Configuration
+const CONFIG = {
+    MAX_CREEPS: 10,
+    ENERGY_SAFETY_BUFFER: 300, // Énergie à garder en réserve
+    MIN_SPAWN_ENERGY: 200,
+    REPORT_INTERVAL: 20
+};
 
 module.exports.loop = function () {
     
@@ -22,23 +31,23 @@ module.exports.loop = function () {
     // Générer la liste des tâches disponibles
     let tasks = generateTaskList(room);
     
+    // Compter les assignations actuelles
+    let taskAssignments = countTaskAssignments();
+    
     // Afficher les tâches (debug)
-    if (Game.time % 10 === 0) {
-        console.log(`📋 ${tasks.length} tâches disponibles`);
-        tasks.slice(0, 5).forEach(t => {
-            console.log(`  ${t.type}: priorité ${t.priority.toFixed(2)} @${t.pos.x},${t.pos.y}`);
-        });
+    if (Game.time % CONFIG.REPORT_INTERVAL === 0) {
+        reportTasks(tasks, taskAssignments);
     }
     
-    // Spawner un creep si possible
+    // Spawner un creep si possible (avec matelas de sécurité)
     if (!spawn.spawning) {
-        spawnCreep(spawn);
+        spawnCreepSmart(spawn);
     }
     
     // Faire travailler tous les creeps
     for (let name in Game.creeps) {
         let creep = Game.creeps[name];
-        runCreep(creep, tasks);
+        runCreep(creep, tasks, taskAssignments);
     }
 };
 
@@ -81,7 +90,7 @@ function generateHarvestTasks(room) {
     });
     
     droppedResources.forEach(resource => {
-        let priority = 80 + (resource.amount / 100); // Plus y'en a, plus c'est prioritaire
+        let priority = 80 + (resource.amount / 100);
         tasks.push({
             type: 'harvest',
             subtype: 'pickup',
@@ -135,7 +144,7 @@ function generateHarvestTasks(room) {
             subtype: 'mine',
             targetId: source.id,
             pos: source.pos,
-            priority: 50, // Moins prioritaire que l'énergie déjà extraite
+            priority: 50,
             amount: source.energy
         });
     });
@@ -159,7 +168,7 @@ function generateTransferTasks(room) {
     
     structures.forEach(structure => {
         let capacity = structure.store.getFreeCapacity(RESOURCE_ENERGY);
-        let priority = 100; // PRIORITÉ ABSOLUE
+        let priority = 100;
         
         // Encore plus urgent si spawn complètement vide
         if (structure.structureType === STRUCTURE_SPAWN && 
@@ -184,7 +193,7 @@ function generateTransferTasks(room) {
     
     towers.forEach(tower => {
         let fillPercent = tower.store[RESOURCE_ENERGY] / tower.store.getCapacity(RESOURCE_ENERGY);
-        let priority = 60 + (1 - fillPercent) * 20; // Plus vide = plus prioritaire
+        let priority = 60 + (1 - fillPercent) * 20;
         
         tasks.push({
             type: 'transfer',
@@ -225,7 +234,10 @@ function generateBuildTasks(room) {
         else if (site.structureType === STRUCTURE_EXTENSION) priority = 85;
         else if (site.structureType === STRUCTURE_TOWER) priority = 80;
         else if (site.structureType === STRUCTURE_CONTAINER) priority = 75;
+        else if (site.structureType === STRUCTURE_STORAGE) priority = 70;
         else if (site.structureType === STRUCTURE_ROAD) priority = 40;
+        else if (site.structureType === STRUCTURE_WALL) priority = 35;
+        else if (site.structureType === STRUCTURE_RAMPART) priority = 35;
         
         // Bonus si proche de la fin
         let progressPercent = site.progress / site.progressTotal;
@@ -236,7 +248,8 @@ function generateBuildTasks(room) {
             targetId: site.id,
             pos: site.pos,
             priority: priority,
-            amount: site.progressTotal - site.progress
+            amount: site.progressTotal - site.progress,
+            structureType: site.structureType
         });
     });
     
@@ -275,6 +288,7 @@ function generateRepairTasks(room) {
         // Prioriser types importants
         if (structure.structureType === STRUCTURE_SPAWN) priority += 20;
         else if (structure.structureType === STRUCTURE_TOWER) priority += 15;
+        else if (structure.structureType === STRUCTURE_EXTENSION) priority += 10;
         else if (structure.structureType === STRUCTURE_CONTAINER) priority += 5;
         
         tasks.push({
@@ -282,7 +296,8 @@ function generateRepairTasks(room) {
             targetId: structure.id,
             pos: structure.pos,
             priority: priority,
-            amount: structure.hitsMax - structure.hits
+            amount: structure.hitsMax - structure.hits,
+            structureType: structure.structureType
         });
     });
     
@@ -298,16 +313,16 @@ function generateUpgradeTasks(room) {
     if (!room.controller || !room.controller.my) return tasks;
     
     let controller = room.controller;
-    let priority = 45; // Priorité de base basse
+    let priority = 45;
     
     // URGENT si risque de downgrade
     if (controller.ticksToDowngrade) {
-        let downgradePercent = controller.ticksToDowngrade / 20000; // Max ~20k pour RCL 1-2
+        let downgradePercent = controller.ticksToDowngrade / 20000;
         
         if (downgradePercent < 0.2) {
-            priority = 95; // CRITIQUE
+            priority = 95;
         } else if (downgradePercent < 0.5) {
-            priority = 70; // Urgent
+            priority = 70;
         }
     }
     
@@ -322,16 +337,36 @@ function generateUpgradeTasks(room) {
         targetId: controller.id,
         pos: controller.pos,
         priority: priority,
-        amount: Infinity // Toujours de l'upgrade à faire
+        amount: Infinity
     });
     
     return tasks;
 }
 
 /**
+ * 📊 COMPTE LES ASSIGNATIONS ACTUELLES
+ * Retourne {targetId: nombre_de_creeps}
+ */
+function countTaskAssignments() {
+    let assignments = {};
+    
+    for (let name in Game.creeps) {
+        let creep = Game.creeps[name];
+        if (creep.memory.taskId) {
+            if (!assignments[creep.memory.taskId]) {
+                assignments[creep.memory.taskId] = 0;
+            }
+            assignments[creep.memory.taskId]++;
+        }
+    }
+    
+    return assignments;
+}
+
+/**
  * 🤖 LOGIQUE CREEP - Assigne et exécute les tâches
  */
-function runCreep(creep, tasks) {
+function runCreep(creep, tasks, taskAssignments) {
     
     let currentEnergy = creep.store[RESOURCE_ENERGY];
     let maxEnergy = creep.store.getCapacity(RESOURCE_ENERGY);
@@ -340,17 +375,25 @@ function runCreep(creep, tasks) {
     if (creep.memory.working && currentEnergy === 0) {
         creep.memory.working = false;
         creep.memory.taskId = null;
+        creep.memory.taskType = null;
     }
     else if (!creep.memory.working && currentEnergy === maxEnergy) {
         creep.memory.working = true;
         creep.memory.taskId = null;
+        creep.memory.taskType = null;
     }
     
     // Mode HARVEST: chercher de l'énergie
     if (!creep.memory.working) {
         let harvestTasks = tasks.filter(t => t.type === 'harvest');
         if (harvestTasks.length > 0) {
-            executeTask(creep, harvestTasks[0]);
+            // Prendre une tâche harvest non saturée
+            let task = findAvailableTask(harvestTasks, taskAssignments, 2); // Max 2 creeps par source
+            if (task) {
+                creep.memory.taskId = task.targetId;
+                creep.memory.taskType = task.type;
+                executeTask(creep, task);
+            }
         }
         return;
     }
@@ -360,10 +403,13 @@ function runCreep(creep, tasks) {
         let workTasks = tasks.filter(t => t.type !== 'harvest');
         
         if (workTasks.length > 0) {
-            // Prendre la tâche la plus prioritaire
-            let task = workTasks[0];
-            creep.memory.taskId = task.targetId;
-            creep.memory.taskType = task.type;
+            // Prendre une tâche non saturée
+            let task = findAvailableTask(workTasks, taskAssignments, 1);
+            
+            if (task) {
+                creep.memory.taskId = task.targetId;
+                creep.memory.taskType = task.type;
+            }
         }
     }
     
@@ -379,6 +425,28 @@ function runCreep(creep, tasks) {
             creep.memory.taskType = null;
         }
     }
+}
+
+/**
+ * 🎯 TROUVE UNE TÂCHE DISPONIBLE (non saturée)
+ * maxAssignments: nombre max de creeps par tâche
+ */
+function findAvailableTask(tasks, taskAssignments, maxAssignments) {
+    for (let task of tasks) {
+        let currentAssignments = taskAssignments[task.targetId] || 0;
+        
+        // Upgrade peut avoir plusieurs creeps
+        if (task.type === 'upgrade') {
+            maxAssignments = 5;
+        }
+        
+        if (currentAssignments < maxAssignments) {
+            return task;
+        }
+    }
+    
+    // Si tout est saturé, retourner la première tâche quand même
+    return tasks[0] || null;
 }
 
 /**
@@ -442,27 +510,52 @@ function getTaskColor(taskType) {
 }
 
 /**
- * 👶 SPAWNING
+ * 👶 SPAWN INTELLIGENT avec matelas de sécurité
  */
-function spawnCreep(spawn) {
+function spawnCreepSmart(spawn) {
+    let room = spawn.room;
     let creeps = _.filter(Game.creeps);
     
-    // Spawner seulement si on a moins de 5 creeps
-    if (creeps.length >= 5) return;
+    // Ne pas dépasser le max
+    if (creeps.length >= CONFIG.MAX_CREEPS) return;
     
-    let energy = spawn.room.energyAvailable;
+    let availableEnergy = room.energyAvailable;
+    let capacityEnergy = room.energyCapacityAvailable;
     
-    // Corps minimal
-    if (energy < 200) return;
+    // Calculer l'énergie utilisable (en gardant un buffer)
+    let usableEnergy = Math.max(
+        CONFIG.MIN_SPAWN_ENERGY,
+        availableEnergy - CONFIG.ENERGY_SAFETY_BUFFER
+    );
+    
+    // Ne spawn que si on a assez pour un creep minimal
+    if (usableEnergy < CONFIG.MIN_SPAWN_ENERGY) return;
+    
+    // URGENCE: aucun creep, utiliser toute l'énergie disponible
+    if (creeps.length === 0) {
+        usableEnergy = availableEnergy;
+        console.log('🚨 EMERGENCY SPAWN');
+    }
+    // Si peu de creeps (< 3), être plus agressif
+    else if (creeps.length < 3) {
+        usableEnergy = Math.min(capacityEnergy, availableEnergy - 100);
+    }
     
     // Corps adaptatif: [WORK, CARRY, MOVE] x N
-    let units = Math.floor(energy / 200);
+    let units = Math.floor(usableEnergy / 200);
     units = Math.min(units, 10);
+    
+    if (units === 0) return;
     
     let body = [];
     for (let i = 0; i < units; i++) {
         body.push(WORK, CARRY, MOVE);
     }
+    
+    let bodyCost = units * 200;
+    
+    // Vérifier qu'on a bien l'énergie
+    if (bodyCost > availableEnergy) return;
     
     let name = 'Worker_' + Game.time;
     let result = spawn.spawnCreep(body, name, {
@@ -474,6 +567,40 @@ function spawnCreep(spawn) {
     });
     
     if (result === OK) {
-        console.log('✅ Spawned: ' + name + ' (' + body.length + ' parts)');
+        console.log(`✅ Spawned ${name}: ${body.length} parts, ${bodyCost}E (buffer: ${CONFIG.ENERGY_SAFETY_BUFFER}E)`);
     }
+}
+
+/**
+ * 📊 RAPPORT DES TÂCHES
+ */
+function reportTasks(tasks, taskAssignments) {
+    console.log(`\n📋 ${tasks.length} TÂCHES DISPONIBLES`);
+    console.log('─'.repeat(50));
+    
+    // Compter par type
+    let byType = {};
+    tasks.forEach(t => {
+        if (!byType[t.type]) byType[t.type] = 0;
+        byType[t.type]++;
+    });
+    
+    console.log('Par type:');
+    for (let type in byType) {
+        console.log(`  ${type}: ${byType[type]}`);
+    }
+    
+    console.log('\nTop 5 priorités:');
+    tasks.slice(0, 5).forEach(t => {
+        let assigned = taskAssignments[t.targetId] || 0;
+        let label = t.structureType || t.subtype || '';
+        console.log(`  ${t.type} ${label}: ${t.priority.toFixed(1)} [${assigned} creep(s)]`);
+    });
+    
+    // Statistiques creeps
+    let totalCreeps = Object.keys(Game.creeps).length;
+    let working = _.filter(Game.creeps, c => c.memory.working).length;
+    let harvesting = totalCreeps - working;
+    
+    console.log(`\n🤖 ${totalCreeps} creeps: ${working} work, ${harvesting} harvest`);
 }
