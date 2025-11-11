@@ -27,6 +27,9 @@ module.exports.loop = function () {
         }
     }
     
+    // 🔧 MIGRATION : Convertir anciens creeps en workers
+    migrateOldCreeps();
+    
     let spawn = Game.spawns['Spawn1'];
     if (!spawn) return;
     
@@ -60,6 +63,27 @@ module.exports.loop = function () {
         }
     }
 };
+
+/**
+ * 🔄 MIGRATION DES ANCIENS CREEPS
+ * Convertit automatiquement les creeps sans rôle en workers
+ */
+function migrateOldCreeps() {
+    for (let name in Game.creeps) {
+        let creep = Game.creeps[name];
+        
+        // Si pas de rôle défini, c'est un ancien creep
+        if (!creep.memory.role) {
+            console.log(`🔄 Migration: ${name} → worker`);
+            creep.memory.role = 'worker';
+            creep.memory.working = false;
+            creep.memory.taskId = null;
+            creep.memory.sourceId = null;
+            // Nettoyer anciennes propriétés
+            delete creep.memory.taskType;
+        }
+    }
+}
 
 /**
  * 📊 ANALYSE DE LA POPULATION
